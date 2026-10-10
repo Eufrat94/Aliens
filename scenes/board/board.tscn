@@ -1,0 +1,97 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/board/board.gd" id="1_board"]
+[ext_resource type="Script" path="res://scenes/board/connections_layer.gd" id="2_connections"]
+
+[node name="Board" type="Node2D"]
+script = ExtResource("1_board")
+
+[node name="ConnectionsLayer" type="Node2D" parent="."]
+script = ExtResource("2_connections")
+
+[node name="Tiles" type="Node2D" parent="."]
+
+[node name="Legend" type="VBoxContainer" parent="."]
+offset_left = 1300.0
+offset_top = 120.0
+offset_right = 1560.0
+offset_bottom = 420.0
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Legend"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 28
+text = "Paths"
+
+[node name="NormalRow" type="HBoxContainer" parent="Legend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Swatch" type="ColorRect" parent="Legend/NormalRow"]
+custom_minimum_size = Vector2(40, 14)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4
+color = Color(0.545098, 0.352941, 0.168627, 1)
+
+[node name="Name" type="Label" parent="Legend/NormalRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 22
+text = "Normal"
+vertical_alignment = 1
+
+[node name="JungleRow" type="HBoxContainer" parent="Legend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Swatch" type="ColorRect" parent="Legend/JungleRow"]
+custom_minimum_size = Vector2(40, 14)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4
+color = Color(0.486275, 0.760784, 0.258824, 1)
+
+[node name="Name" type="Label" parent="Legend/JungleRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 22
+text = "Jungle"
+vertical_alignment = 1
+
+[node name="RiverRow" type="HBoxContainer" parent="Legend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Swatch" type="ColorRect" parent="Legend/RiverRow"]
+custom_minimum_size = Vector2(40, 14)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4
+color = Color(0.117647, 0.564706, 1, 1)
+
+[node name="Name" type="Label" parent="Legend/RiverRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 22
+text = "River"
+vertical_alignment = 1
+
+[node name="PlaneRow" type="HBoxContainer" parent="Legend"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Swatch" type="ColorRect" parent="Legend/PlaneRow"]
+custom_minimum_size = Vector2(40, 14)
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 4
+color = Color(0.529412, 0.807843, 0.921569, 1)
+
+[node name="Name" type="Label" parent="Legend/PlaneRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 22
+text = "Plane"
+vertical_alignment = 1
