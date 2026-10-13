@@ -1,0 +1,141 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/hud.gd" id="1_hud"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_info"]
+bg_color = Color(0.145, 0.137, 0.196, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+
+[node name="Hud" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1600.0
+offset_bottom = 900.0
+mouse_filter = 2
+script = ExtResource("1_hud")
+
+[node name="HandTray" type="ColorRect" parent="."]
+layout_mode = 0
+offset_top = 636.0
+offset_right = 1600.0
+offset_bottom = 900.0
+mouse_filter = 2
+color = Color(0.165, 0.153, 0.22, 1)
+
+[node name="InfoPanel" type="Panel" parent="."]
+layout_mode = 0
+offset_left = 1020.0
+offset_top = 10.0
+offset_right = 1584.0
+offset_bottom = 628.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_info")
+
+[node name="Margin" type="MarginContainer" parent="InfoPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 10
+
+[node name="Column" type="VBoxContainer" parent="InfoPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TurnLabel" type="Label" parent="InfoPanel/Margin/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "Player 1's turn"
+
+[node name="ActionsLabel" type="Label" parent="InfoPanel/Margin/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.93, 0.93, 0.96, 1)
+theme_override_font_sizes/font_size = 20
+text = "Actions left: 3 / 3"
+
+[node name="InstructionLabel" type="Label" parent="InfoPanel/Margin/Column"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.84, 0.84, 0.9, 1)
+theme_override_font_sizes/font_size = 15
+text = "Choose a card to play."
+autowrap_mode = 3
+
+[node name="PlayersHeading" type="Label" parent="InfoPanel/Margin/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Players"
+
+[node name="PlayerList" type="VBoxContainer" parent="InfoPanel/Margin/Column"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HandTitle" type="Label" parent="."]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 644.0
+offset_right = 620.0
+offset_bottom = 674.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "Your hand"
+
+[node name="HandRow" type="Control" parent="."]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 688.0
+offset_right = 640.0
+offset_bottom = 890.0
+mouse_filter = 2
+
+[node name="PlayedTitle" type="Label" parent="."]
+layout_mode = 0
+offset_left = 660.0
+offset_top = 644.0
+offset_right = 1260.0
+offset_bottom = 674.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 20
+text = "Played"
+
+[node name="PlayedRow" type="Control" parent="."]
+layout_mode = 0
+offset_left = 660.0
+offset_top = 688.0
+offset_right = 1280.0
+offset_bottom = 890.0
+mouse_filter = 2
+
+[node name="RecallButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 1324.0
+offset_top = 700.0
+offset_right = 1564.0
+offset_bottom = 756.0
+theme_override_font_sizes/font_size = 18
+disabled = true
+text = "Recall (1 action)"
+
+[node name="EndTurnButton" type="Button" parent="."]
+layout_mode = 0
+offset_left = 1324.0
+offset_top = 772.0
+offset_right = 1564.0
+offset_bottom = 828.0
+theme_override_font_sizes/font_size = 18
+text = "End turn"

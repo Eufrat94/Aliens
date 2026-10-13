@@ -1,0 +1,91 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/setup/setup_screen.gd" id="1_setup"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
+bg_color = Color(0.965, 0.955, 0.99, 1)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+content_margin_left = 36.0
+content_margin_top = 32.0
+content_margin_right = 36.0
+content_margin_bottom = 32.0
+
+[node name="SetupScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1600.0
+offset_bottom = 900.0
+script = ExtResource("1_setup")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.7843137, 0.7490196, 0.9058824, 1)
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Box" type="PanelContainer" parent="Center"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="Margin" type="VBoxContainer" parent="Center/Box"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="Title" type="Label" parent="Center/Box/Margin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.1, 0.08, 0.16, 1)
+theme_override_font_sizes/font_size = 48
+text = "Aliens — new game"
+horizontal_alignment = 1
+
+[node name="Question" type="Label" parent="Center/Box/Margin"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.22, 0.2, 0.3, 1)
+theme_override_font_sizes/font_size = 28
+text = "How many players?"
+horizontal_alignment = 1
+
+[node name="Buttons" type="HBoxContainer" parent="Center/Box/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="Count2" type="Button" parent="Center/Box/Margin/Buttons"]
+custom_minimum_size = Vector2(88, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "2"
+
+[node name="Count3" type="Button" parent="Center/Box/Margin/Buttons"]
+custom_minimum_size = Vector2(88, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "3"
+
+[node name="Count4" type="Button" parent="Center/Box/Margin/Buttons"]
+custom_minimum_size = Vector2(88, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "4"
+
+[node name="Count5" type="Button" parent="Center/Box/Margin/Buttons"]
+custom_minimum_size = Vector2(88, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "5"

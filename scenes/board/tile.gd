@@ -4,8 +4,15 @@ signal tile_clicked(tile_id: String)
 
 var tile_id: String = ""
 
+var _style: StyleBoxFlat
+
 @onready var _name_label: Label = $NameLabel
 @onready var _type_label: Label = $TypeLabel
+
+
+func _ready() -> void:
+	_style = (get_theme_stylebox("panel") as StyleBoxFlat).duplicate()
+	add_theme_stylebox_override("panel", _style)
 
 
 func setup(id: String) -> void:
@@ -13,6 +20,17 @@ func setup(id: String) -> void:
 	var tile := BoardData.get_tile(id)
 	_name_label.text = tile["name"]
 	_type_label.text = _type_name(tile["type"])
+
+
+func set_move_target(on: bool) -> void:
+	if _style == null:
+		return
+	if on:
+		_style.border_color = Color8(241, 196, 15)
+		_style.set_border_width_all(8)
+	else:
+		_style.border_color = Color.BLACK
+		_style.set_border_width_all(4)
 
 
 func _gui_input(event: InputEvent) -> void:
