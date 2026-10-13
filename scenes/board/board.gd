@@ -39,6 +39,12 @@ func refresh_tokens(game: GameState) -> void:
 		_tokens.queue_redraw()
 
 
+func refresh_decks(game: GameState) -> void:
+	for id in _tile_nodes:
+		var tile_id: String = id
+		_tile_nodes[tile_id].set_deck_count(game.deck_count(tile_id))
+
+
 func set_highlighted_tiles(tile_ids: Array) -> void:
 	for id in _tile_nodes:
 		_tile_nodes[id].set_move_target(id in tile_ids)

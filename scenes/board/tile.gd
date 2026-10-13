@@ -8,6 +8,7 @@ var _style: StyleBoxFlat
 
 @onready var _name_label: Label = $NameLabel
 @onready var _type_label: Label = $TypeLabel
+@onready var _deck_label: Label = $DeckLabel
 
 
 func _ready() -> void:
@@ -20,6 +21,17 @@ func setup(id: String) -> void:
 	var tile := BoardData.get_tile(id)
 	_name_label.text = tile["name"]
 	_type_label.text = _type_name(tile["type"])
+
+
+func set_deck_count(count: int) -> void:
+	if count < 0:
+		_deck_label.visible = false
+		return
+	_deck_label.visible = true
+	if count == 0:
+		_deck_label.text = "Deck: empty"
+	else:
+		_deck_label.text = "Deck: %d" % count
 
 
 func set_move_target(on: bool) -> void:
