@@ -5,6 +5,8 @@ signal gear_slot_clicked(slot_index: int)
 signal rest_pressed
 signal end_turn_pressed
 
+const CLAW_HINT := "Click a highlighted tile to draw from its deck. Right-click or Esc to cancel."
+
 const CARD_SCENE := preload("res://scenes/ui/card_view.tscn")
 const CARD_STEP := 128.0
 const CARD_LIFT := 15.0
@@ -20,12 +22,19 @@ const MOVE_HINT := "Click a highlighted tile to move there. Right-click or Esc t
 @onready var _gear_row: Control = $GearRow
 @onready var _rest_button: Button = $RestButton
 @onready var _end_turn_button: Button = $EndTurnButton
+@onready var _log_label: Label = $LogBar/LogLabel
+@onready var _history_overlay: Control = $HistoryOverlay
+@onready var _history_list: VBoxContainer = $HistoryOverlay/HistoryPanel/Margin/Column/HistoryScroll/HistoryList
+
+var _game: GameState
 
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 	_rest_button.pressed.connect(func() -> void: rest_pressed.emit())
 	_end_turn_button.pressed.connect(func() -> void: end_turn_pressed.emit())
+	$LogBar/HistoryButton.pressed.connect(_open_history)
+	$HistoryOverlay/HistoryPanel/Margin/Column/HistoryClose.pressed.connect(_close_history)
 
 
 func show_status(text: String) -> void:
@@ -35,7 +44,12 @@ func show_status(text: String) -> void:
 func refresh(game: GameState, selected_hand_index: int, gear_replace_index: int = -1) -> void:
 	if game.players.is_empty():
 		return
+	_game = game
 	var player: Dictionary = game.current_player()
+	if game.public_log.is_empty():
+		_log_label.text = ""
+	else:
+		_log_label.text = str(game.public_log[0])
 	_turn_label.text = "%s's turn" % player["name"]
 	_turn_label.add_theme_color_override("font_color", player["color"])
 	_actions_label.text = "Actions left: %d / %d" % [game.actions_left, GameState.ACTIONS_PER_TURN]
@@ -44,10 +58,15 @@ func refresh(game: GameState, selected_hand_index: int, gear_replace_index: int 
 	if gear_replace_index >= 0:
 		_instruction_label.text = "Choose a gear slot to replace (Esc to cancel)"
 	elif selected_hand_index >= 0:
-		_instruction_label.text = MOVE_HINT
-	elif game.found_card_id != "":
-		var found_name: String = CardData.get_card(game.found_card_id)["name"]
-		_instruction_label.text = "You found: %s" % found_name
+		var selected_id := ""
+		if selected_hand_index < player["hand"].size():
+			selected_id = str(player["hand"][selected_hand_index])
+		if selected_id == "grappling_claw":
+			_instruction_label.text = CLAW_HINT
+		else:
+			_instruction_label.text = MOVE_HINT
+	elif not game.found_card_ids.is_empty():
+		_instruction_label.text = "You found: %s" % _found_names(game.found_card_ids)
 	elif game.actions_left <= 0:
 		_instruction_label.text = "No actions left."
 	else:
@@ -183,6 +202,29 @@ func _info_label(text: String, color: Color, font_size: int) -> Label:
 	label.add_theme_font_size_override("font_size", font_size)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	return label
+
+
+func _open_history() -> void:
+	if _game == null:
+		return
+	_clear_row(_history_list)
+	if _game.public_log.is_empty():
+		_history_list.add_child(_info_label("No public events yet.", Color(0.8, 0.8, 0.86), 16))
+	else:
+		for line in _game.public_log:
+			_history_list.add_child(_info_label(str(line), Color(0.92, 0.92, 0.96), 16))
+	_history_overlay.visible = true
+
+
+func _close_history() -> void:
+	_history_overlay.visible = false
+
+
+func _found_names(card_ids: Array) -> String:
+	var names: PackedStringArray = PackedStringArray()
+	for card_id in card_ids:
+		names.append(str(CardData.get_card(str(card_id))["name"]))
+	return ", ".join(names)
 
 
 func _count_phrase(count: int) -> String:

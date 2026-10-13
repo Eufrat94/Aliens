@@ -1,5 +1,7 @@
 extends Control
 
+signal dismissed
+
 @onready var _title: Label = $Title
 @onready var _hint: Label = $Hint
 
@@ -14,4 +16,5 @@ func show_for(player: Dictionary) -> void:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		hide()
+		dismissed.emit()
 		accept_event()

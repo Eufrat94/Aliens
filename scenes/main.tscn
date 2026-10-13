@@ -1,10 +1,11 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scenes/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/board/board.tscn" id="2_board"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="3_hud"]
 [ext_resource type="PackedScene" path="res://scenes/setup/setup_screen.tscn" id="4_setup"]
 [ext_resource type="PackedScene" path="res://scenes/ui/pass_screen.tscn" id="5_pass"]
+[ext_resource type="PackedScene" path="res://scenes/ui/private_popup.tscn" id="6_popup"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -19,6 +20,8 @@ color = Color(0.7843137, 0.7490196, 0.9058824, 1)
 scale = Vector2(0.75, 0.75)
 
 [node name="Hud" parent="." instance=ExtResource("3_hud")]
+
+[node name="PrivatePopup" parent="." instance=ExtResource("6_popup")]
 
 [node name="SetupScreen" parent="." instance=ExtResource("4_setup")]
 

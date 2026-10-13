@@ -8,6 +8,7 @@ var _gear_replace_index := -1
 @onready var _hud: Control = $Hud
 @onready var _setup: Control = $SetupScreen
 @onready var _pass: Control = $PassScreen
+@onready var _popup: Control = $PrivatePopup
 
 
 func _ready() -> void:
@@ -26,11 +27,16 @@ func _ready() -> void:
 	_hud.rest_pressed.connect(_on_rest)
 	_hud.end_turn_pressed.connect(_on_end_turn)
 	_board.tile_clicked.connect(_on_tile_clicked)
+	_pass.dismissed.connect(_on_pass_dismissed)
+	_popup.card_picked.connect(_on_popup_card)
+	_popup.button_picked.connect(_on_popup_button)
 	game.state_changed.connect(_on_state_changed)
+	game.prompt_opened.connect(_on_prompt_opened)
+	game.prompt_closed.connect(_on_prompt_closed)
 
 
 func _input(event: InputEvent) -> void:
-	if _pass.visible or _setup.visible:
+	if _pass.visible or _setup.visible or _popup.visible:
 		return
 	if not _is_cancel(event):
 		return
@@ -97,18 +103,35 @@ func _on_card_clicked(hand_index: int) -> void:
 	_clear_move_selection(false)
 	_selected_hand_index = -1
 	if int(card["action"]) == CardData.ActionType.SEARCH:
+		if card_id == "grappling_claw":
+			var targets := game.get_claw_targets()
+			if targets.is_empty():
+				_hud.show_status("No deck next to you.")
+				return
+			_selected_hand_index = hand_index
+			_board.set_highlighted_tiles(targets)
+			_hud.refresh(game, _selected_hand_index, -1)
+			return
 		game.play_search_card(hand_index)
 	else:
 		game.play_placeholder_card(hand_index)
 
 
 func _on_tile_clicked(tile_id: String) -> void:
-	if _gear_replace_index >= 0 or _selected_hand_index < 0:
-		return
-	var destinations := game.get_move_destinations(_selected_hand_index)
-	if tile_id not in destinations:
+	if _popup.visible or _gear_replace_index >= 0 or _selected_hand_index < 0:
 		return
 	var hand_index := _selected_hand_index
+	var card_id: String = game.current_player()["hand"][hand_index]
+	if card_id == "grappling_claw":
+		var targets := game.get_claw_targets()
+		if tile_id not in targets:
+			return
+		_clear_move_selection(false)
+		game.play_claw(hand_index, tile_id)
+		return
+	var destinations := game.get_move_destinations(hand_index)
+	if tile_id not in destinations:
+		return
 	_clear_move_selection(false)
 	game.play_move_card(hand_index, tile_id)
 
@@ -132,7 +155,28 @@ func _on_end_turn() -> void:
 	_gear_replace_index = -1
 	_clear_move_selection(false)
 	game.end_turn()
-	_pass.show_for(game.current_player())
+	if game.prompt.is_empty():
+		_pass.show_for(game.current_player())
+
+
+func _on_pass_dismissed() -> void:
+	game.begin_turn()
+
+
+func _on_prompt_opened(prompt: Dictionary) -> void:
+	_popup.present(prompt)
+
+
+func _on_prompt_closed() -> void:
+	_popup.dismiss()
+
+
+func _on_popup_card(index: int) -> void:
+	game.choose_prompt_card(index)
+
+
+func _on_popup_button(label: String) -> void:
+	game.choose_prompt_button(label)
 
 
 func _clear_move_selection(refresh_hud: bool = true) -> void:
