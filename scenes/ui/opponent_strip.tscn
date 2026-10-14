@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/opponent_strip.gd" id="1_strip"]
+
+[node name="OpponentStrip" type="Panel"]
+offset_right = 200.0
+offset_bottom = 166.0
+script = ExtResource("1_strip")

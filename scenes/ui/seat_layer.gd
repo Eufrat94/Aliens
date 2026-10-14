@@ -6,14 +6,9 @@ signal rest_pressed
 signal end_turn_pressed
 
 const SEAT_SCENE := preload("res://scenes/ui/player_seat.tscn")
-const SEAT_RECTS: Array[Rect2] = [
-	Rect2(8, 548, 384, 524),
-	Rect2(8, 8, 384, 524),
-	Rect2(1528, 8, 384, 524),
-	Rect2(1528, 548, 384, 524),
-]
+const STRIP_SCENE := preload("res://scenes/ui/opponent_strip.tscn")
 
-var _instruction: Label
+var _bottom: Control
 
 
 func _ready() -> void:
@@ -22,35 +17,82 @@ func _ready() -> void:
 
 func refresh(game: GameState, selected_hand_index: int = -1, gear_replace_index: int = -1) -> void:
 	_clear_seats()
-	_instruction = null
+	_bottom = null
 	if game.players.is_empty():
 		return
+	var count := game.players.size()
 	for player in game.players:
 		var who: Dictionary = player
 		var index := int(who["index"])
-		if index < 0 or index >= SEAT_RECTS.size():
-			continue
-		var seat: Control = SEAT_SCENE.instantiate()
-		add_child(seat)
-		var rect: Rect2 = SEAT_RECTS[index]
-		seat.offset_left = rect.position.x
-		seat.offset_top = rect.position.y
-		seat.offset_right = rect.end.x
-		seat.offset_bottom = rect.end.y
-		var is_current := index == game.current_index
-		seat.call("show_player", who, game, is_current, selected_hand_index, gear_replace_index)
-		if is_current:
-			var label := seat.get_node("Margin/Column/TurnRow/Instruction") as Label
-			_instruction = label
-		seat.connect("card_clicked", _emit_card)
-		seat.connect("gear_slot_clicked", _emit_gear)
-		seat.connect("rest_pressed", _emit_rest)
-		seat.connect("end_turn_pressed", _emit_end)
+		var offset := (index - game.current_index + count) % count
+		if offset == 0:
+			_add_bottom(who, game, selected_hand_index, gear_replace_index)
+		else:
+			_add_opponent(who, _slot_for(offset, count))
 
 
 func show_status(text: String) -> void:
-	if _instruction != null:
-		_instruction.text = text
+	if _bottom != null:
+		_bottom.call("set_instruction", text)
+
+
+func _slot_for(offset: int, count: int) -> String:
+	if count == 2:
+		return "top"
+	if count == 3:
+		return "left" if offset == 1 else "right"
+	if offset == 1:
+		return "left"
+	if offset == 2:
+		return "top"
+	return "right"
+
+
+func _add_bottom(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int) -> void:
+	var seat: Control = SEAT_SCENE.instantiate()
+	add_child(seat)
+	_place_upright(seat, UiConfig.BOTTOM_REGION)
+	seat.call("show_player", player, game, selected_hand_index, gear_replace_index)
+	_bottom = seat
+	seat.connect("card_clicked", _emit_card)
+	seat.connect("gear_slot_clicked", _emit_gear)
+	seat.connect("rest_pressed", _emit_rest)
+	seat.connect("end_turn_pressed", _emit_end)
+
+
+func _add_opponent(player: Dictionary, slot: String) -> void:
+	var strip: Control = STRIP_SCENE.instantiate()
+	add_child(strip)
+	var region := _region(slot)
+	var column := slot != "top" and not UiConfig.ROTATE_SIDE_SEATS
+	if column or slot == "top":
+		_place_upright(strip, region)
+	elif slot == "left":
+		strip.size = Vector2(region.size.y, region.size.x)
+		strip.pivot_offset = Vector2.ZERO
+		strip.rotation = PI / 2.0
+		strip.position = Vector2(region.end.x, region.position.y)
+	else:
+		strip.size = Vector2(region.size.y, region.size.x)
+		strip.pivot_offset = Vector2.ZERO
+		strip.rotation = -PI / 2.0
+		strip.position = Vector2(region.position.x, region.end.y)
+	strip.call("show_player", player, column)
+
+
+func _region(slot: String) -> Rect2:
+	if slot == "left":
+		return UiConfig.LEFT_REGION
+	if slot == "right":
+		return UiConfig.RIGHT_REGION
+	return UiConfig.TOP_REGION
+
+
+func _place_upright(seat: Control, region: Rect2) -> void:
+	seat.rotation = 0.0
+	seat.pivot_offset = Vector2.ZERO
+	seat.position = region.position
+	seat.size = region.size
 
 
 func _emit_card(hand_index: int) -> void:
@@ -74,4 +116,4 @@ func _clear_seats() -> void:
 		if str(child.name) == "Legend":
 			continue
 		remove_child(child)
-		child.free()
+		child.queue_free()

@@ -6,7 +6,7 @@ signal tile_clicked(tile_id: String)
 const TILE_SCENE := preload("res://scenes/board/tile.tscn")
 const TILE_WIDTH := 260.0
 const TILE_HEIGHT := 150.0
-const H_GAP := 140.0
+const H_GAP := 620.0
 const V_GAP := 110.0
 const BOARD_ORIGIN := Vector2(20, 16)
 const TOKEN_RADIUS := 24.0
@@ -76,6 +76,12 @@ func content_bounds() -> Rect2:
 		max_p.x = maxf(max_p.x, at.x)
 		max_p.y = maxf(max_p.y, at.y)
 	return Rect2(min_p, max_p - min_p).grow(28.0)
+
+
+func tile_rect(tile_id: String) -> Rect2:
+	var tile: Control = _tile_nodes[tile_id]
+	var top_left: Vector2 = position + tile.position * scale
+	return Rect2(top_left, tile.size * scale)
 
 
 func get_tile_center(id: String) -> Vector2:

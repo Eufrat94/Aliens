@@ -9,6 +9,17 @@ var _game: GameState
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
+	var bar := $LogBar as Control
+	var log_region := UiConfig.LOG_REGION
+	bar.position = log_region.position
+	bar.size = log_region.size
+	_log_label.offset_right = log_region.size.x - 118.0
+	_log_label.offset_bottom = log_region.size.y
+	var button := $LogBar/HistoryButton as Control
+	button.offset_left = log_region.size.x - 108.0
+	button.offset_right = log_region.size.x - 8.0
+	button.offset_bottom = log_region.size.y - 1.0
+	UiConfig.place_centered($HistoryOverlay/HistoryPanel as Control, Vector2(760, 560))
 	$LogBar/HistoryButton.pressed.connect(_open_history)
 	$HistoryOverlay/HistoryPanel/Margin/Column/HistoryClose.pressed.connect(_close_history)
 

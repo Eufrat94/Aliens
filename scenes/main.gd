@@ -1,7 +1,5 @@
 extends Node2D
 
-const BOARD_REGION := Rect2(400, 0, 1120, 1040)
-
 var game := GameState.new()
 var _selected_hand_index := -1
 var _gear_replace_index := -1
@@ -243,28 +241,27 @@ func _clear_move_selection(refresh_hud: bool = true) -> void:
 func _fit_board() -> void:
 	var bounds: Rect2 = _board.content_bounds()
 	var margin := 6.0
-	var avail := BOARD_REGION.size - Vector2(margin, margin) * 2.0
+	var region := UiConfig.BOARD_REGION
+	var avail := region.size - Vector2(margin, margin) * 2.0
 	var fit := minf(avail.x / bounds.size.x, avail.y / bounds.size.y)
 	_board.scale = Vector2(fit, fit)
 	var scaled: Vector2 = bounds.size * fit
-	var top_left: Vector2 = BOARD_REGION.position + (BOARD_REGION.size - scaled) * 0.5
+	var top_left: Vector2 = region.position + (region.size - scaled) * 0.5
 	_board.position = top_left - bounds.position * fit
 	_place_legend(top_left, scaled)
 
 
-func _place_legend(board_top_left: Vector2, scaled: Vector2) -> void:
+func _place_legend(_board_top_left: Vector2, _scaled: Vector2) -> void:
 	var legend := _seats.get_node("Legend") as Control
-	var width := 128.0
-	var height := 96.0
-	var x := BOARD_REGION.position.x + 12.0
-	var board_bottom := board_top_left.y + scaled.y
-	var y := board_bottom + 8.0
-	if y + height > BOARD_REGION.end.y - 4.0:
-		y = BOARD_REGION.end.y - height - 4.0
-	legend.offset_left = x
-	legend.offset_top = y
-	legend.offset_right = x + width
-	legend.offset_bottom = y + height
+	var crystal: Rect2 = _board.tile_rect("crystal_mount")
+	var lake: Rect2 = _board.tile_rect("lake")
+	var width := 124.0
+	var height := 86.0
+	var gap := lake.position.x - crystal.end.x
+	var x := crystal.end.x + (gap - width) * 0.5
+	var y := crystal.position.y + 4.0
+	legend.position = Vector2(x, y)
+	legend.size = Vector2(width, height)
 
 
 func _toggle_fullscreen() -> void:

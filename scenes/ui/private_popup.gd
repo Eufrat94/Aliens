@@ -11,6 +11,10 @@ const CARD_SCENE := preload("res://scenes/ui/card_view.tscn")
 @onready var _button_row: HBoxContainer = $Panel/Margin/Column/ButtonRow
 
 
+func _ready() -> void:
+	UiConfig.place_centered($Panel as Control, Vector2(1000, 560))
+
+
 func present(data: Dictionary) -> void:
 	_title.text = str(data["title"])
 	_message.text = str(data["message"])

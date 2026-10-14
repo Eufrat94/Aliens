@@ -1,6 +1,6 @@
 extends Panel
 
-const CARD_SIZE := Vector2(72, 100)
+const CARD_SIZE := Vector2(86, 120)
 
 var _card_id := ""
 var _style: StyleBoxFlat

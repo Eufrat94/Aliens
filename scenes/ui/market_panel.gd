@@ -15,6 +15,7 @@ const CARD_SCENE := preload("res://scenes/ui/card_view.tscn")
 
 
 func _ready() -> void:
+	UiConfig.place_centered($Panel as Control, Vector2(1280, 700))
 	_done.pressed.connect(_on_done)
 	_sell_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	_sell_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
