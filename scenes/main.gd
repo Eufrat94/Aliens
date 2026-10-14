@@ -432,6 +432,7 @@ func _place_legend(_board_top_left: Vector2, _scaled: Vector2) -> void:
 	var y := crystal.position.y + 4.0
 	legend.position = Vector2(x, y)
 	legend.size = Vector2(width, height)
+	_hud.place_discard(crystal, lake, Rect2(legend.position, legend.size))
 
 
 func _toggle_fullscreen() -> void:

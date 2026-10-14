@@ -103,6 +103,12 @@ func current_player() -> Dictionary:
 	return players[current_index]
 
 
+func discard_top() -> String:
+	if discard.is_empty():
+		return ""
+	return discard[discard.size() - 1]
+
+
 func deck_count(tile_id: String) -> int:
 	if not decks.has(tile_id):
 		return -1
