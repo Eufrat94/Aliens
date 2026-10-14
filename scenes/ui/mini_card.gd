@@ -31,6 +31,21 @@ func set_selected(on: bool) -> void:
 		_style.set_border_width_all(2)
 
 
+func apply_size(card_size: Vector2) -> void:
+	custom_minimum_size = card_size
+	size = card_size
+	var strip: ColorRect = $Strip
+	strip.offset_left = 4
+	strip.offset_top = 4
+	strip.offset_right = card_size.x - 4
+	strip.offset_bottom = 24
+	var name_label: Label = $NameLabel
+	name_label.offset_left = 4
+	name_label.offset_top = 26
+	name_label.offset_right = card_size.x - 4
+	name_label.offset_bottom = card_size.y - 4
+
+
 func setup(card_id: String) -> void:
 	_card_id = card_id
 	var card: Dictionary = CardData.get_card(card_id)

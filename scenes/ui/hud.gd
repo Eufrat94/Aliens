@@ -1,6 +1,8 @@
 extends Control
 
 @onready var _log_label: Label = $LogBar/LogLabel
+
+var _discard_label: Label
 @onready var _history_overlay: Control = $HistoryOverlay
 @onready var _history_list: VBoxContainer = $HistoryOverlay/HistoryPanel/Margin/Column/HistoryScroll/HistoryList
 
@@ -13,8 +15,20 @@ func _ready() -> void:
 	var log_region := UiConfig.LOG_REGION
 	bar.position = log_region.position
 	bar.size = log_region.size
-	_log_label.offset_right = log_region.size.x - 118.0
+	_log_label.offset_right = log_region.size.x - 230.0
 	_log_label.offset_bottom = log_region.size.y
+	_discard_label = Label.new()
+	_discard_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_discard_label.offset_left = log_region.size.x - 222.0
+	_discard_label.offset_top = 0.0
+	_discard_label.offset_right = log_region.size.x - 112.0
+	_discard_label.offset_bottom = log_region.size.y
+	_discard_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_discard_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_discard_label.add_theme_font_size_override("font_size", 14)
+	_discard_label.add_theme_color_override("font_color", Color(0.75, 0.75, 0.82))
+	_discard_label.text = "Discard: 0"
+	bar.add_child(_discard_label)
 	var button := $LogBar/HistoryButton as Control
 	button.offset_left = log_region.size.x - 108.0
 	button.offset_right = log_region.size.x - 8.0
@@ -32,6 +46,8 @@ func refresh_log(game: GameState) -> void:
 		_log_label.text = ""
 	else:
 		_log_label.text = str(game.public_log[0])
+	if _discard_label != null:
+		_discard_label.text = "Discard: %d" % game.discard.size()
 
 
 func _open_history() -> void:

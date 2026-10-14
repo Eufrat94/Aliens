@@ -10,6 +10,7 @@ var _card_id := ""
 
 var _style: StyleBoxFlat
 var _playable := false
+var _tag_label: Label
 
 @onready var _name_label: Label = $NameLabel
 @onready var _action_strip: ColorRect = $ActionStrip
@@ -33,6 +34,15 @@ func _ready() -> void:
 	_name_label.add_theme_font_override("font", bold)
 	mouse_entered.connect(_on_mouse_entered)
 	mouse_exited.connect(_on_mouse_exited)
+	_tag_label = Label.new()
+	_tag_label.mouse_filter = MOUSE_FILTER_IGNORE
+	_tag_label.position = Vector2(6, 64)
+	_tag_label.size = Vector2(118, 16)
+	_tag_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tag_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_tag_label.add_theme_font_size_override("font_size", 11)
+	_tag_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.45))
+	add_child(_tag_label)
 
 
 func setup(card_id: String, index: int, playable: bool, faded: bool, selected: bool, is_new: bool = false, reason: String = "") -> void:
@@ -95,19 +105,31 @@ func _preview_call(method: String, card_id: String) -> void:
 static func strip_for(card: Dictionary) -> Dictionary:
 	var kind := int(card["kind"])
 	if kind == CardData.Kind.GEAR:
-		return {"color": Color8(93, 109, 126), "title": "GEAR", "title_color": Color.WHITE}
+		var active := str(card.get("gear_mode", "")) == "active"
+		return {
+			"color": Color8(93, 109, 126),
+			"title": "GEAR · ACTIVE" if active else "GEAR",
+			"title_color": Color.WHITE,
+		}
+	if kind == CardData.Kind.ABILITY:
+		return {"color": Color8(230, 126, 34), "title": "ABILITY", "title_color": Color.WHITE}
 	if kind == CardData.Kind.RESOURCE:
 		return {
 			"color": Color8(212, 172, 13),
 			"title": "RESOURCE",
 			"title_color": Color(0.12, 0.09, 0.02),
 		}
-	var action: CardData.ActionType = card["action"]
-	return {
-		"color": _action_color(action),
-		"title": CardData.action_name(action).to_upper(),
-		"title_color": Color.WHITE,
-	}
+	return {"color": Color.GRAY, "title": "", "title_color": Color.WHITE}
+
+
+static func action_tag(card: Dictionary) -> String:
+	if int(card["kind"]) == CardData.Kind.RESOURCE:
+		return ""
+	if not card.has("action"):
+		return ""
+	if int(card["action"]) == CardData.ActionType.NONE:
+		return ""
+	return CardData.action_name(card["action"])
 
 
 func _apply_kind(card: Dictionary) -> void:
@@ -115,6 +137,12 @@ func _apply_kind(card: Dictionary) -> void:
 	_action_label.text = str(strip["title"])
 	_action_strip.color = strip["color"]
 	_action_label.add_theme_color_override("font_color", strip["title_color"])
+	_action_label.add_theme_font_size_override("font_size", 11)
+	var tag := action_tag(card)
+	if _tag_label != null:
+		_tag_label.visible = tag != ""
+		_tag_label.text = tag
+	_body_label.offset_top = 82.0 if tag != "" else 66.0
 
 
 func _apply_selected(selected: bool) -> void:
@@ -138,14 +166,3 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 
 
-static func _action_color(action: CardData.ActionType) -> Color:
-	match action:
-		CardData.ActionType.MOVE:
-			return Color8(139, 90, 43)
-		CardData.ActionType.SEARCH:
-			return Color8(22, 160, 133)
-		CardData.ActionType.INTERACT:
-			return Color8(142, 68, 173)
-		CardData.ActionType.FIGHT:
-			return Color8(192, 57, 43)
-	return Color.GRAY

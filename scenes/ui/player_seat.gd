@@ -2,7 +2,11 @@ extends Panel
 
 signal card_clicked(hand_index: int)
 signal gear_slot_clicked(slot_index: int)
-signal rest_pressed
+signal gear_use_pressed(slot_index: int)
+signal move_pressed
+signal search_pressed
+signal interact_pressed
+signal fight_pressed
 signal end_turn_pressed
 
 const MINI_SCENE := preload("res://scenes/ui/mini_card.tscn")
@@ -18,7 +22,7 @@ func _ready() -> void:
 	clip_contents = true
 
 
-func show_player(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int) -> void:
+func show_player(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> void:
 	for child in get_children():
 		remove_child(child)
 		child.queue_free()
@@ -26,21 +30,24 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 	_apply_chrome(player["color"])
 	var inset := 12.0
 	var header_h := 36.0
-	var header := _build_header(player, game, selected_hand_index, gear_replace_index)
+	var header := _build_header(player, game, selected_hand_index, gear_replace_index, selecting_move)
 	header.position = Vector2(inset, 8)
 	header.size = Vector2(size.x - inset * 2.0, header_h)
 	add_child(header)
 
 	var row_top := 8.0 + header_h + 4.0
 	var row_h := size.y - row_top - 10.0
-	var gap := 16.0
-	var gear_w := UiConfig.MINI_SIZE.x * 3.0 + 8.0
-	var played_w := 380.0
+	var gap := 14.0
+	var action_w := 168.0
+	var gear_w := UiConfig.MINI_SIZE.x * float(GameState.GEAR_SLOTS) + 12.0
 	var inner_w := size.x - inset * 2.0
-	var hand_w := inner_w - gear_w - played_w - gap * 2.0
-	var hand_x := inset
-	var played_x := hand_x + hand_w + gap
-	var gear_x := played_x + played_w + gap
+	var hand_w := inner_w - action_w - gear_w - gap * 2.0
+	var hand_x := inset + action_w + gap
+	var gear_x := hand_x + hand_w + gap
+
+	var actions := _build_actions(game, row_h)
+	actions.position = Vector2(inset, row_top)
+	add_child(actions)
 
 	var hand := Control.new()
 	hand.mouse_filter = MOUSE_FILTER_IGNORE
@@ -48,33 +55,6 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 	add_child(hand)
 	_fill_hand(hand, player, game, selected_hand_index, gear_replace_index)
 	UiConfig.layout_fan(hand, hand_w, CardView.CARD_SIZE, row_h - CardView.CARD_SIZE.y)
-
-	var played_box := Control.new()
-	played_box.mouse_filter = MOUSE_FILTER_IGNORE
-	played_box.position = Vector2(played_x, row_top)
-	played_box.size = Vector2(played_w, row_h)
-	add_child(played_box)
-	var played: Array = player["played"]
-	if played.is_empty():
-		var empty := Label.new()
-		empty.text = "—"
-		empty.mouse_filter = MOUSE_FILTER_IGNORE
-		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		empty.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		empty.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
-		empty.add_theme_font_size_override("font_size", 22)
-		played_box.add_child(empty)
-	else:
-		var played_host := Control.new()
-		played_host.mouse_filter = MOUSE_FILTER_IGNORE
-		played_box.add_child(played_host)
-		for card_id in played:
-			var mini: Control = MINI_SCENE.instantiate()
-			played_host.add_child(mini)
-			mini.call("setup", str(card_id))
-			mini.modulate = Color(1, 1, 1, 0.6)
-		UiConfig.layout_fan(played_host, played_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
 
 	var gear_box := Control.new()
 	gear_box.mouse_filter = MOUSE_FILTER_IGNORE
@@ -98,10 +78,13 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 		if slot < gear.size():
 			var mini: Control = MINI_SCENE.instantiate()
 			gear_host.add_child(mini)
-			mini.call("setup", str(gear[slot]))
+			var gear_id := str(gear[slot])
+			mini.call("setup", gear_id)
 			mini.call("set_selected", replacing)
 			if replacing:
 				mini.gui_input.connect(_on_gear_input.bind(slot))
+			else:
+				_add_use_badge(mini, slot, game, gear_id)
 		else:
 			gear_host.add_child(UiConfig.empty_slot())
 	UiConfig.layout_fan(gear_host, gear_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
@@ -121,7 +104,7 @@ func _apply_chrome(color: Color) -> void:
 	add_theme_stylebox_override("panel", style)
 
 
-func _build_header(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int) -> HBoxContainer:
+func _build_header(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -165,15 +148,8 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 	_instruction.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_instruction.add_theme_color_override("font_color", Color(0.9, 0.9, 0.95))
 	_instruction.add_theme_font_size_override("font_size", 15)
-	_instruction.text = _instruction_text(player, game, selected_hand_index, gear_replace_index)
+	_instruction.text = _instruction_text(player, game, selected_hand_index, gear_replace_index, selecting_move)
 	row.add_child(_instruction)
-
-	var rest := Button.new()
-	rest.text = "Rest (1 action)"
-	rest.custom_minimum_size = Vector2(150, 32)
-	rest.disabled = not game.can_rest()
-	rest.pressed.connect(func() -> void: rest_pressed.emit())
-	row.add_child(rest)
 
 	var end_turn := Button.new()
 	end_turn.text = "End turn"
@@ -183,7 +159,32 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 	return row
 
 
-func _instruction_text(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int) -> String:
+func _build_actions(game: GameState, row_h: float) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.mouse_filter = MOUSE_FILTER_IGNORE
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	var button_h := (row_h - 6.0) * 0.5
+	grid.add_child(_action_button("Move", game.can_move(), game.move_reason(), button_h, move_pressed))
+	grid.add_child(_action_button("Search", game.can_search(), game.search_reason(), button_h, search_pressed))
+	grid.add_child(_action_button("Interact", game.can_interact(), game.interact_reason(), button_h, interact_pressed))
+	grid.add_child(_action_button("Fight", game.can_fight(), game.fight_reason(), button_h, fight_pressed))
+	return grid
+
+
+func _action_button(title: String, enabled: bool, reason: String, button_h: float, pressed_signal: Signal) -> Button:
+	var button := Button.new()
+	button.text = title
+	button.custom_minimum_size = Vector2(78, button_h)
+	button.disabled = not enabled
+	if not enabled and reason != "":
+		button.tooltip_text = reason
+	button.pressed.connect(func() -> void: pressed_signal.emit())
+	return button
+
+
+func _instruction_text(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> String:
 	if gear_replace_index >= 0:
 		return "Choose a gear slot to replace (Esc to cancel)"
 	if selected_hand_index >= 0:
@@ -194,11 +195,13 @@ func _instruction_text(player: Dictionary, game: GameState, selected_hand_index:
 		if selected_id == "grappling_claw":
 			return CLAW_HINT
 		return MOVE_HINT
+	if selecting_move:
+		return MOVE_HINT
 	if not game.found_card_ids.is_empty():
 		return "You found: %s" % _found_names(game.found_card_ids)
 	if game.actions_left <= 0:
 		return "No actions left."
-	return "Choose a card to play."
+	return "Move, search, or play a card."
 
 
 func _paint_pips(pips: HBoxContainer, actions_left: int) -> void:
@@ -218,28 +221,48 @@ func _paint_pips(pips: HBoxContainer, actions_left: int) -> void:
 
 func _fill_hand(host: Control, player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int) -> void:
 	var hand: Array = player["hand"]
-	var fresh: Array = player["fresh"]
 	for i in hand.size():
 		var card_id: String = hand[i]
-		var enabled := _hand_enabled(game, i)
+		var enabled := game.can_play_card(i)
 		var reason := ""
 		if not enabled:
 			reason = game.play_reason(i)
 		var selected := i == selected_hand_index or i == gear_replace_index
-		var is_new: bool = bool(fresh[i])
 		var card_view: CardView = CARD_SCENE.instantiate()
 		host.add_child(card_view)
-		card_view.setup(card_id, i, enabled, false, selected, is_new, reason)
+		card_view.setup(card_id, i, enabled, false, selected, false, reason)
 		if selected:
 			card_view.set_meta("fan_raised", true)
 		card_view.card_clicked.connect(_on_card_clicked)
 
 
-func _hand_enabled(game: GameState, index: int) -> bool:
-	var card: Dictionary = CardData.get_card(game.current_player()["hand"][index])
-	if int(card["kind"]) == CardData.Kind.GEAR:
-		return game.can_equip(index)
-	return game.can_play_card(index)
+func _add_use_badge(mini: Control, slot: int, game: GameState, card_id: String) -> void:
+	var card: Dictionary = CardData.get_card(card_id)
+	if str(card.get("gear_mode", "")) != "active":
+		return
+	var used: Array = game.current_player()["gear_used_this_turn"]
+	if card_id in used:
+		var label := Label.new()
+		label.text = "Used"
+		label.mouse_filter = MOUSE_FILTER_IGNORE
+		label.position = Vector2(4, 94)
+		label.size = Vector2(78, 22)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", 12)
+		label.add_theme_color_override("font_color", Color(0.35, 0.35, 0.4))
+		mini.add_child(label)
+		return
+	var button := Button.new()
+	button.text = "Use (1)"
+	button.position = Vector2(4, 94)
+	button.size = Vector2(78, 22)
+	button.disabled = not game.can_use_gear(slot)
+	var reason := game.gear_use_reason(slot)
+	if reason != "":
+		button.tooltip_text = reason
+	button.pressed.connect(func() -> void: gear_use_pressed.emit(slot))
+	mini.add_child(button)
 
 
 func _on_card_clicked(hand_index: int) -> void:

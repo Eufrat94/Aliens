@@ -6,6 +6,7 @@ const ROTATE_SIDE_SEATS := true
 
 const HOVER_LIFT := 10.0
 const MINI_SIZE := Vector2(86, 120)
+const OPPONENT_GEAR_SIZE := Vector2(104, 118)
 const BACK_SIZE := Vector2(56, 80)
 const DEPTH := 166.0
 
@@ -120,10 +121,10 @@ static func card_back() -> Panel:
 	return panel
 
 
-static func empty_slot() -> Panel:
+static func empty_slot(slot_size: Vector2 = MINI_SIZE) -> Panel:
 	var panel := Panel.new()
-	panel.custom_minimum_size = MINI_SIZE
-	panel.size = MINI_SIZE
+	panel.custom_minimum_size = slot_size
+	panel.size = slot_size
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(1, 1, 1, 0.04)

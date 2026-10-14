@@ -9,6 +9,7 @@ var _name_label: Label
 var _strip: ColorRect
 var _strip_label: Label
 var _body_label: Label
+var _tag_label: Label
 
 
 func _ready() -> void:
@@ -46,6 +47,11 @@ func _show_pending() -> void:
 	_strip_label.text = str(strip["title"])
 	_strip_label.add_theme_color_override("font_color", strip["title_color"])
 	_body_label.text = str(card["text"])
+	var tag := CardView.action_tag(card)
+	_tag_label.visible = tag != ""
+	_tag_label.text = tag
+	_body_label.position = Vector2(12, 148 if tag != "" else 122)
+	_body_label.size = Vector2(196, 150 if tag != "" else 176)
 	_place_near_cursor()
 	_panel.visible = true
 
@@ -104,6 +110,15 @@ func _build_panel() -> void:
 	_strip_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_strip_label.add_theme_font_size_override("font_size", 14)
 	_strip.add_child(_strip_label)
+
+	_tag_label = Label.new()
+	_tag_label.mouse_filter = MOUSE_FILTER_IGNORE
+	_tag_label.position = Vector2(12, 116)
+	_tag_label.size = Vector2(196, 22)
+	_tag_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tag_label.add_theme_font_size_override("font_size", 13)
+	_tag_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.45))
+	_panel.add_child(_tag_label)
 
 	_body_label = Label.new()
 	_body_label.mouse_filter = MOUSE_FILTER_IGNORE

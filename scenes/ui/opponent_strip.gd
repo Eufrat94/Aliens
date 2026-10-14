@@ -1,6 +1,7 @@
 extends Panel
 
 const MINI_SCENE := preload("res://scenes/ui/mini_card.tscn")
+const GEAR_SIZE := UiConfig.OPPONENT_GEAR_SIZE
 
 
 func _ready() -> void:
@@ -38,10 +39,8 @@ func _build_row(player: Dictionary) -> void:
 	var row_h := size.y - row_top - 4.0
 	var inner_w := size.x - inset * 2.0
 	var count_w := 78.0
-	var gear_w := UiConfig.MINI_SIZE.x * 3.0 + 4.0
-	var flex := inner_w - gear_w - count_w - 12.0
-	var backs_w := flex * 0.4
-	var played_w := flex - backs_w
+	var gear_w := GEAR_SIZE.x * float(GameState.GEAR_SLOTS) + 12.0
+	var backs_w := inner_w - gear_w - count_w - 16.0
 	var x := inset
 
 	var backs := _fan_host()
@@ -55,19 +54,12 @@ func _build_row(player: Dictionary) -> void:
 	count.position = Vector2(x, row_top)
 	count.size = Vector2(count_w, row_h)
 	add_child(count)
-	x += count_w + 8.0
-
-	var played := _fan_host()
-	played.position = Vector2(x, row_top)
-	add_child(played)
-	_fill_played(played, player["played"], false)
-	UiConfig.layout_fan(played, played_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
 
 	var gear := _fan_host()
 	gear.position = Vector2(inset + inner_w - gear_w, row_top)
 	add_child(gear)
 	_fill_gear(gear, player["gear"])
-	UiConfig.layout_fan(gear, gear_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
+	UiConfig.layout_fan(gear, gear_w, GEAR_SIZE, row_h - GEAR_SIZE.y)
 
 
 func _build_column(player: Dictionary) -> void:
@@ -112,25 +104,16 @@ func _build_column(player: Dictionary) -> void:
 	UiConfig.layout_fan(backs, width, UiConfig.BACK_SIZE, UiConfig.HOVER_LIFT)
 	y += backs_h + 8.0
 
-	var gear_h := 20.0 + UiConfig.HOVER_LIFT + UiConfig.MINI_SIZE.y
-	var gear_top := size.y - 6.0 - gear_h
-	var played_h := gear_top - 8.0 - y
-	var played := _fan_host()
-	played.position = Vector2(inset, y)
-	played.size = Vector2(width, maxf(played_h, UiConfig.MINI_SIZE.y))
-	add_child(played)
-	_fill_played(played, player["played"], false)
-	_layout_wrapped(played, width, maxf(played_h, UiConfig.MINI_SIZE.y))
-
 	var gear_title := _small_label("Gear (%d/%d)" % [player["gear"].size(), GameState.GEAR_SLOTS])
-	gear_title.position = Vector2(inset, gear_top)
+	gear_title.position = Vector2(inset, y)
 	gear_title.size = Vector2(width, 20)
 	add_child(gear_title)
+	y += 20.0
 	var gear := _fan_host()
-	gear.position = Vector2(inset, gear_top + 20.0)
+	gear.position = Vector2(inset, y)
 	add_child(gear)
 	_fill_gear(gear, player["gear"])
-	UiConfig.layout_fan(gear, width, UiConfig.MINI_SIZE, UiConfig.HOVER_LIFT)
+	UiConfig.layout_fan(gear, width, GEAR_SIZE, UiConfig.HOVER_LIFT)
 
 
 func _header(player: Dictionary) -> HBoxContainer:
@@ -200,60 +183,12 @@ func _fill_backs(host: Control, hand: Array) -> void:
 		host.add_child(UiConfig.card_back())
 
 
-func _fill_played(host: Control, played: Array, faded: bool) -> void:
-	for card_id in played:
-		var mini: Control = MINI_SCENE.instantiate()
-		host.add_child(mini)
-		mini.call("setup", str(card_id))
-		if faded:
-			mini.modulate = Color(1, 1, 1, 0.6)
-
-
 func _fill_gear(host: Control, gear: Array) -> void:
 	for slot in GameState.GEAR_SLOTS:
 		if slot < gear.size():
 			var mini: Control = MINI_SCENE.instantiate()
 			host.add_child(mini)
 			mini.call("setup", str(gear[slot]))
+			mini.call("apply_size", GEAR_SIZE)
 		else:
-			host.add_child(UiConfig.empty_slot())
-
-
-func _layout_wrapped(host: Control, width: float, height: float) -> void:
-	var cards: Array[Control] = []
-	for child in host.get_children():
-		var control: Control = child as Control
-		if control != null:
-			cards.append(control)
-	var count := cards.size()
-	var card_size := UiConfig.MINI_SIZE
-	host.size = Vector2(width, height)
-	if count == 0:
-		return
-	var per_row := 1
-	if width >= card_size.x + 6.0:
-		per_row = maxi(1, int((width + 6.0) / (card_size.x + 6.0)))
-	var rows := int(ceil(float(count) / float(per_row)))
-	var row_step := card_size.y + 6.0
-	if rows > 1 and card_size.y + float(rows - 1) * row_step > height - UiConfig.HOVER_LIFT:
-		row_step = (height - UiConfig.HOVER_LIFT - card_size.y) / float(rows - 1)
-	var col_step := card_size.x + 6.0
-	if per_row > 1 and card_size.x + float(per_row - 1) * col_step > width:
-		col_step = (width - card_size.x) / float(per_row - 1)
-	for i in count:
-		var card: Control = cards[i]
-		var col := i % per_row
-		var row := int(float(i) / float(per_row))
-		var x := col_step * float(col)
-		var y := UiConfig.HOVER_LIFT + row_step * float(row)
-		card.position = Vector2(x, y)
-		card.z_index = i
-		card.set_meta("fan_x", x)
-		card.set_meta("fan_base", y)
-		card.set_meta("fan_rest", y)
-		card.set_meta("fan_z", i)
-		if bool(card.get_meta("fan_wired", false)):
-			continue
-		card.set_meta("fan_wired", true)
-		card.mouse_entered.connect(UiConfig.raise_card.bind(card))
-		card.mouse_exited.connect(UiConfig.lower_card.bind(card))
+			host.add_child(UiConfig.empty_slot(GEAR_SIZE))

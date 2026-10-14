@@ -2,7 +2,11 @@ extends Control
 
 signal card_clicked(hand_index: int)
 signal gear_slot_clicked(slot_index: int)
-signal rest_pressed
+signal gear_use_pressed(slot_index: int)
+signal move_pressed
+signal search_pressed
+signal interact_pressed
+signal fight_pressed
 signal end_turn_pressed
 
 const SEAT_SCENE := preload("res://scenes/ui/player_seat.tscn")
@@ -15,7 +19,7 @@ func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
 
 
-func refresh(game: GameState, selected_hand_index: int = -1, gear_replace_index: int = -1) -> void:
+func refresh(game: GameState, selected_hand_index: int = -1, gear_replace_index: int = -1, selecting_move: bool = false) -> void:
 	_clear_seats()
 	_bottom = null
 	if game.players.is_empty():
@@ -26,7 +30,7 @@ func refresh(game: GameState, selected_hand_index: int = -1, gear_replace_index:
 		var index := int(who["index"])
 		var offset := (index - game.current_index + count) % count
 		if offset == 0:
-			_add_bottom(who, game, selected_hand_index, gear_replace_index)
+			_add_bottom(who, game, selected_hand_index, gear_replace_index, selecting_move)
 		else:
 			_add_opponent(who, _slot_for(offset, count))
 
@@ -48,15 +52,19 @@ func _slot_for(offset: int, count: int) -> String:
 	return "right"
 
 
-func _add_bottom(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int) -> void:
+func _add_bottom(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> void:
 	var seat: Control = SEAT_SCENE.instantiate()
 	add_child(seat)
 	_place_upright(seat, UiConfig.BOTTOM_REGION)
-	seat.call("show_player", player, game, selected_hand_index, gear_replace_index)
+	seat.call("show_player", player, game, selected_hand_index, gear_replace_index, selecting_move)
 	_bottom = seat
 	seat.connect("card_clicked", _emit_card)
 	seat.connect("gear_slot_clicked", _emit_gear)
-	seat.connect("rest_pressed", _emit_rest)
+	seat.connect("gear_use_pressed", _emit_gear_use)
+	seat.connect("move_pressed", _emit_move)
+	seat.connect("search_pressed", _emit_search)
+	seat.connect("interact_pressed", _emit_interact)
+	seat.connect("fight_pressed", _emit_fight)
 	seat.connect("end_turn_pressed", _emit_end)
 
 
@@ -103,8 +111,24 @@ func _emit_gear(slot_index: int) -> void:
 	gear_slot_clicked.emit(slot_index)
 
 
-func _emit_rest() -> void:
-	rest_pressed.emit()
+func _emit_gear_use(slot_index: int) -> void:
+	gear_use_pressed.emit(slot_index)
+
+
+func _emit_move() -> void:
+	move_pressed.emit()
+
+
+func _emit_search() -> void:
+	search_pressed.emit()
+
+
+func _emit_interact() -> void:
+	interact_pressed.emit()
+
+
+func _emit_fight() -> void:
+	fight_pressed.emit()
 
 
 func _emit_end() -> void:

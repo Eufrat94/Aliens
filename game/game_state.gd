@@ -4,12 +4,14 @@ extends RefCounted
 signal state_changed
 signal prompt_opened(prompt: Dictionary)
 signal prompt_closed
+signal turn_ended
 
 const ACTIONS_PER_TURN := 3
-const GEAR_SLOTS := 3
+const GEAR_SLOTS := 4
 const DEBUG_SHOW_SECRETS := true
 const DEBUG_GIVE_ALL_ITEMS := false
 const STARTING_GOLD := 5
+const STARTING_RESOURCES := 2
 const MARKET_OFFER_SIZE := 3
 const MARKET_BUY_PRICE := 2
 const MARKET_SELL_PRICE := 3
@@ -22,22 +24,24 @@ const PLAYER_COLORS: Array[Color] = [
 	Color8(230, 126, 34),
 ]
 const SEARCH_TILES: Array[String] = ["junkyard", "archeology_site", "lake", "spaceship"]
-const LURE_SEARCHES: Array[String] = [
-	"rummage",
-	"metal_detector",
-	"grappling_claw",
-	"ancient_trowel",
-	"cargo_manifest",
+const ANY_PATH: Array = [
+	BoardData.PathType.NORMAL,
+	BoardData.PathType.JUNGLE,
+	BoardData.PathType.RIVER,
+	BoardData.PathType.PLANE,
 ]
+const TOP_DRAW_ABILITIES: Array[String] = ["ancient_trowel", "cargo_manifest", "grappling_claw"]
 
 var players: Array = []
 var current_index: int = 0
 var actions_left: int = ACTIONS_PER_TURN
 var decks: Dictionary = {}
+var discard: Array[String] = []
 var found_card_ids: Array[String] = []
 var public_log: Array[String] = []
 var prompt: Dictionary = {}
 var market_visit: Dictionary = {}
+var _pending_end := false
 
 
 func start_game(player_count: int) -> void:
@@ -46,36 +50,29 @@ func start_game(player_count: int) -> void:
 		return
 	players = []
 	for i in player_count:
-		var hand: Array[String] = CardData.starting_hand()
+		var hand: Array[String] = CardData.random_starting_hand(STARTING_RESOURCES)
 		if DEBUG_GIVE_ALL_ITEMS:
 			for item_id in CardData.item_ids():
 				hand.append(item_id)
-		var fresh: Array[bool] = []
-		fresh.resize(hand.size())
-		fresh.fill(false)
-		var played: Array[String] = []
-		var played_fresh: Array[bool] = []
-		var gear: Array[String] = []
 		players.append({
 			"index": i,
 			"name": "Player %d" % (i + 1),
 			"color": PLAYER_COLORS[i],
 			"tile": START_TILE,
 			"hand": hand,
-			"fresh": fresh,
-			"played": played,
-			"played_fresh": played_fresh,
-			"gear": gear,
+			"gear": [],
+			"gear_used_this_turn": [],
 			"gold": STARTING_GOLD,
 			"market_offer": [],
 			"purple": 0,
-			"lure_used": false,
+			"lure_used_this_turn": false,
 		})
 	decks = {}
 	for tile_id in SEARCH_TILES:
 		var deck: Array[String] = DeckData.build_deck(tile_id)
 		deck.shuffle()
 		decks[tile_id] = deck
+	discard = []
 	for player in players:
 		refresh_market_offer(player)
 	current_index = 0
@@ -84,6 +81,7 @@ func start_game(player_count: int) -> void:
 	public_log.clear()
 	prompt = {}
 	market_visit = {}
+	_pending_end = false
 	state_changed.emit()
 
 
@@ -98,19 +96,120 @@ func deck_count(tile_id: String) -> int:
 	return deck.size()
 
 
-func can_play_card(hand_index: int) -> bool:
-	if not _hand_has(hand_index):
-		return false
+func move_paths(player: Dictionary) -> Array:
+	var paths: Array = [BoardData.PathType.NORMAL]
+	var gear: Array = player["gear"]
+	for gear_id in gear:
+		var card: Dictionary = CardData.get_card(str(gear_id))
+		if not card.has("grants_paths"):
+			continue
+		var granted: Array = card["grants_paths"]
+		for path in granted:
+			if not _path_allowed(path, paths):
+				paths.append(path)
+	return paths
+
+
+func get_move_destinations() -> Array[String]:
+	if players.is_empty():
+		var none: Array[String] = []
+		return none
+	return _reachable(str(current_player()["tile"]), move_paths(current_player()), 1)
+
+
+func can_move() -> bool:
+	return move_reason() == ""
+
+
+func move_reason() -> String:
+	if _is_busy():
+		return "Finish the current choice first"
 	if actions_left <= 0:
+		return "No actions left"
+	if get_move_destinations().is_empty():
+		return "Nowhere to move"
+	return ""
+
+
+func do_move(destination: String) -> bool:
+	if _is_busy():
+		print("Refused: finish the current choice first")
 		return false
-	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.ACTION:
+	if not can_move():
+		print("Refused: %s" % move_reason())
 		return false
-	if int(card["action"]) == CardData.ActionType.SEARCH:
-		return _search_block_reason_for(card) == ""
-	if int(card["action"]) == CardData.ActionType.INTERACT:
-		return BoardData.has_interaction(str(current_player()["tile"]))
+	if destination not in get_move_destinations():
+		print("Refused: can't reach that tile")
+		return false
+	_move_to(current_player(), destination)
+	actions_left -= 1
+	state_changed.emit()
 	return true
+
+
+func can_search() -> bool:
+	return search_reason() == ""
+
+
+func search_reason() -> String:
+	if _is_busy():
+		return "Finish the current choice first"
+	if actions_left <= 0:
+		return "No actions left"
+	return _deck_here_reason()
+
+
+func do_search() -> bool:
+	if _is_busy():
+		print("Refused: finish the current choice first")
+		return false
+	if not can_search():
+		print("Refused: %s" % search_reason())
+		return false
+	if _lure_applies():
+		_ask_lure("base", -1, "", str(current_player()["tile"]), -1)
+		return true
+	return _perform_base_search(false)
+
+
+func can_interact() -> bool:
+	return interact_reason() == ""
+
+
+func interact_reason() -> String:
+	if _is_busy():
+		return "Finish the current choice first"
+	if actions_left <= 0:
+		return "No actions left"
+	if not BoardData.has_interaction(str(current_player()["tile"])):
+		return "Nothing to interact with here"
+	return ""
+
+
+func do_interact() -> bool:
+	if _is_busy():
+		print("Refused: finish the current choice first")
+		return false
+	if not can_interact():
+		print("Refused: %s" % interact_reason())
+		return false
+	var bought: Array[String] = []
+	market_visit = {"sold": 0, "bought": bought}
+	return true
+
+
+func can_fight() -> bool:
+	return false
+
+
+func fight_reason() -> String:
+	return "No enemies here"
+
+
+func can_play_card(hand_index: int) -> bool:
+	if _is_busy() or not _hand_has(hand_index):
+		return false
+	return play_reason(hand_index) == ""
 
 
 func play_reason(hand_index: int) -> String:
@@ -126,29 +225,23 @@ func play_reason(hand_index: int) -> String:
 		if _wearing(current_player(), str(card["id"])):
 			return "You already have this gear"
 		return ""
-	if kind == CardData.Kind.ACTION and int(card["action"]) == CardData.ActionType.SEARCH:
-		return _search_block_reason_for(card)
-	if kind == CardData.Kind.ACTION and int(card["action"]) == CardData.ActionType.INTERACT:
-		if not BoardData.has_interaction(str(current_player()["tile"])):
-			return "Nothing to interact with here"
-	return ""
+	if kind == CardData.Kind.ABILITY:
+		return _ability_block_reason(card)
+	return "That card cannot be played"
 
 
-func get_move_destinations(hand_index: int) -> Array[String]:
+func ability_destinations(hand_index: int) -> Array[String]:
 	var destinations: Array[String] = []
 	if not _hand_has(hand_index):
 		return destinations
 	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.ACTION:
-		return destinations
-	if int(card["action"]) != CardData.ActionType.MOVE:
-		return destinations
-	if not card.has("move_paths"):
-		return destinations
-	var steps := 1
-	if card.has("move_steps"):
-		steps = int(card["move_steps"])
-	return _reachable(str(current_player()["tile"]), card["move_paths"], steps)
+	var card_id := str(card["id"])
+	var player := current_player()
+	if card_id == "scrap_hoverboard":
+		return _reachable(str(player["tile"]), move_paths(player), 2)
+	if card_id == "patchwork_glider":
+		return _reachable(str(player["tile"]), ANY_PATH, 1)
+	return destinations
 
 
 func get_claw_targets() -> Array[String]:
@@ -165,76 +258,116 @@ func get_claw_targets() -> Array[String]:
 	return targets
 
 
-func play_move_card(hand_index: int, destination: String) -> bool:
-	if _refuse_unplayable(hand_index):
+func play_gear(hand_index: int, replace_slot: int = -1) -> bool:
+	if _is_busy():
+		print("Refused: finish the current choice first")
+		return false
+	if not can_play_card(hand_index):
+		var reason := play_reason(hand_index)
+		print("Refused: %s" % (reason if reason != "" else "that card cannot be played"))
 		return false
 	var player := current_player()
 	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.ACTION or int(card["action"]) != CardData.ActionType.MOVE:
-		print("Refused: that card cannot move")
+	if int(card["kind"]) != CardData.Kind.GEAR:
+		print("Refused: that card can't be equipped")
 		return false
-	var destinations := get_move_destinations(hand_index)
-	if destination not in destinations:
-		print("Refused: can't reach that tile")
+	var gear: Array = player["gear"]
+	var card_id := _take_from_hand(player, hand_index)
+	if gear.size() < GEAR_SLOTS:
+		gear.append(card_id)
+		actions_left -= 1
+		_public("%s put down %s" % [player["name"], card["name"]])
+		state_changed.emit()
+		return true
+	if replace_slot < 0 or replace_slot >= gear.size():
+		player["hand"].insert(hand_index, card_id)
+		print("Refused: choose a gear slot to replace")
 		return false
-	var from_tile: String = player["tile"]
-	var path := _path_between(from_tile, destination, card["move_paths"])
-	var path_label := "normal"
-	if path >= 0:
-		path_label = BoardData.path_type_name(path)
-	player["tile"] = destination
-	_pay(player, hand_index)
-	print("%s played %s: %s -> %s (%s)" % [
+	var old_id: String = gear[replace_slot]
+	gear[replace_slot] = card_id
+	discard.append(old_id)
+	actions_left -= 1
+	_public("%s put down %s (discarded %s)" % [
 		player["name"],
 		card["name"],
-		_tile_name(from_tile),
-		_tile_name(destination),
-		path_label,
+		CardData.get_card(old_id)["name"],
 	])
-	_log_only("%s moved %s → %s (%s)" % [
-		player["name"],
-		_tile_name(from_tile),
-		_tile_name(destination),
-		card["name"],
-	])
-	if destination == START_TILE and from_tile != START_TILE:
-		refresh_market_offer(player)
-	_maybe_map(player, destination)
 	state_changed.emit()
 	return true
 
 
-func play_search_card(hand_index: int) -> bool:
-	if _refuse_unplayable(hand_index):
+func play_ability(hand_index: int, destination: String = "", source_tile: String = "") -> bool:
+	if not _prepare_ability(hand_index):
 		return false
-	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.ACTION or int(card["action"]) != CardData.ActionType.SEARCH:
-		print("Refused: that card cannot search")
-		return false
-	var card_id := str(card["id"])
+	var card_id := str(current_player()["hand"][hand_index])
+	if card_id == "scrap_hoverboard" or card_id == "patchwork_glider":
+		return _resolve_move_ability(hand_index, destination)
 	if card_id == "grappling_claw":
-		print("Refused: choose a tile to grab")
-		return false
-	if _wants_lure(card_id):
-		_ask_lure(hand_index, card_id, "")
+		if source_tile == "":
+			print("Refused: choose a tile to grab")
+			return false
+		if source_tile not in get_claw_targets():
+			print("Refused: no deck there")
+			return false
+		if _lure_applies():
+			_ask_lure("ability", hand_index, card_id, source_tile, -1)
+			return true
+		return _resolve_claw(hand_index, source_tile, false)
+	if card_id == "alien_tracker":
+		return _ask_tracker(hand_index)
+	if _lure_applies() and card_id in TOP_DRAW_ABILITIES:
+		_ask_lure("ability", hand_index, card_id, str(current_player()["tile"]), -1)
 		return true
-	return _resolve_search(hand_index, card_id, false, "")
+	return _resolve_search_ability(hand_index, card_id, false, str(current_player()["tile"]))
 
 
-func play_claw(hand_index: int, tile_id: String) -> bool:
-	if _refuse_unplayable(hand_index):
+func can_use_gear(slot: int) -> bool:
+	if players.is_empty():
 		return false
-	var card := _card_at(hand_index)
-	if str(card["id"]) != "grappling_claw":
-		print("Refused: that card cannot grab")
+	var gear: Array = current_player()["gear"]
+	if slot < 0 or slot >= gear.size():
 		return false
-	if tile_id not in get_claw_targets():
-		print("Refused: no deck there")
+	var card: Dictionary = CardData.get_card(str(gear[slot]))
+	if str(card.get("gear_mode", "")) != "active":
 		return false
-	if _wants_lure("grappling_claw"):
-		_ask_lure(hand_index, "grappling_claw", tile_id)
+	return gear_use_reason(slot) == ""
+
+
+func gear_use_reason(slot: int) -> String:
+	if players.is_empty():
+		return ""
+	var gear: Array = current_player()["gear"]
+	if slot < 0 or slot >= gear.size():
+		return ""
+	var card_id := str(gear[slot])
+	var card: Dictionary = CardData.get_card(card_id)
+	if str(card.get("gear_mode", "")) != "active":
+		return ""
+	var used: Array = current_player()["gear_used_this_turn"]
+	if card_id in used:
+		return "Used"
+	if _is_busy():
+		return "Finish the current choice first"
+	if actions_left <= 0:
+		return "No actions left"
+	if card_id == "metal_detector":
+		return _deck_here_reason()
+	return ""
+
+
+func use_gear(slot: int) -> bool:
+	if _is_busy():
+		print("Refused: finish the current choice first")
+		return false
+	if not can_use_gear(slot):
+		var reason := gear_use_reason(slot)
+		print("Refused: %s" % (reason if reason != "" else "that gear cannot be used"))
+		return false
+	var card_id := str(current_player()["gear"][slot])
+	if card_id == "metal_detector" and _lure_applies():
+		_ask_lure("gear", -1, card_id, str(current_player()["tile"]), slot)
 		return true
-	return _resolve_search(hand_index, "grappling_claw", false, tile_id)
+	return _finish_gear_use(slot, false)
 
 
 func choose_prompt_card(index: int) -> void:
@@ -264,9 +397,8 @@ func choose_prompt_card(index: int) -> void:
 		other = first
 	deck.append(other)
 	var player := current_player()
-	_add_to_hand(player, kept, true)
+	_add_to_hand(player, kept)
 	found_card_ids.append(kept)
-	_announce_search(player, tile_id, "metal_detector")
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(kept)["name"]])
 	_secret("%s put back: %s" % [player["name"], CardData.get_card(other)["name"]])
 	_close_prompt()
@@ -281,8 +413,21 @@ func choose_prompt_button(label: String) -> void:
 		_resolve_lure(label)
 	elif kind == "radio_pick":
 		_resolve_radio(label)
-	elif kind == "notebook" and label == "Swap order":
-		_swap_notebook()
+	elif kind == "notebook":
+		if label == "Swap order":
+			_swap_visible_pair()
+		else:
+			var ending := _pending_end
+			_close_prompt()
+			if ending:
+				_advance_turn()
+	elif kind == "reorder":
+		if label == "Swap order":
+			_swap_visible_pair()
+		else:
+			_close_prompt()
+	elif kind == "tracker_pick":
+		_resolve_tracker(label)
 	else:
 		_close_prompt()
 
@@ -298,9 +443,11 @@ func begin_turn() -> void:
 	for tile_id in SEARCH_TILES:
 		if deck_count(tile_id) <= 0:
 			continue
-		var label := _tile_name(tile_id)
-		buttons.append(label)
-		tile_for[label] = tile_id
+		var deck_label := _tile_name(tile_id)
+		buttons.append(deck_label)
+		tile_for[deck_label] = tile_id
+	if buttons.is_empty():
+		return
 	buttons.append("Skip")
 	_open_prompt({
 		"kind": "radio_pick",
@@ -313,117 +460,6 @@ func begin_turn() -> void:
 	})
 
 
-func play_placeholder_card(hand_index: int) -> bool:
-	if _refuse_unplayable(hand_index):
-		return false
-	var player := current_player()
-	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.ACTION:
-		print("Refused: that card cannot be played")
-		return false
-	var action := int(card["action"])
-	if action == CardData.ActionType.MOVE:
-		print("Refused: choose a tile to move")
-		return false
-	if action == CardData.ActionType.SEARCH:
-		print("Refused: that card cannot be played")
-		return false
-	if action == CardData.ActionType.INTERACT:
-		return begin_market(hand_index)
-	if action != CardData.ActionType.FIGHT:
-		print("Refused: that card cannot be played")
-		return false
-	_pay(player, hand_index)
-	_public("%s played %s (no effect yet)" % [player["name"], card["name"]])
-	state_changed.emit()
-	return true
-
-
-func can_equip(hand_index: int) -> bool:
-	if actions_left <= 0 or not _hand_has(hand_index):
-		return false
-	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.GEAR:
-		return false
-	return not _wearing(current_player(), str(card["id"]))
-
-
-func equip_gear(hand_index: int, replace_slot: int = -1) -> bool:
-	if _is_busy():
-		print("Refused: finish the current choice first")
-		return false
-	if not _hand_has(hand_index):
-		print("Refused: no card there")
-		return false
-	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.GEAR:
-		print("Refused: that card can't be equipped")
-		return false
-	if actions_left <= 0:
-		print("Refused: No actions left")
-		return false
-	var player := current_player()
-	if _wearing(player, str(card["id"])):
-		print("Refused: You already have this gear")
-		return false
-	var gear: Array = player["gear"]
-	var card_id: String = player["hand"][hand_index]
-	if gear.size() < GEAR_SLOTS:
-		_take_from_hand(player, hand_index)
-		gear.append(card_id)
-		actions_left -= 1
-		_public("%s equipped %s" % [player["name"], card["name"]])
-		state_changed.emit()
-		return true
-	if replace_slot < 0 or replace_slot >= gear.size():
-		print("Refused: choose a gear slot to replace")
-		return false
-	var old_id: String = gear[replace_slot]
-	_take_from_hand(player, hand_index)
-	gear[replace_slot] = card_id
-	_add_to_hand(player, old_id, false)
-	actions_left -= 1
-	_public("%s equipped %s (swapped out %s)" % [
-		player["name"],
-		card["name"],
-		CardData.get_card(old_id)["name"],
-	])
-	state_changed.emit()
-	return true
-
-
-func can_rest() -> bool:
-	return actions_left > 0 and not current_player()["played"].is_empty()
-
-
-func rest() -> bool:
-	if _is_busy():
-		print("Refused: finish the current choice first")
-		return false
-	if actions_left <= 0:
-		print("Refused: No actions left")
-		return false
-	var player := current_player()
-	var played: Array = player["played"]
-	if played.is_empty():
-		print("Refused: Nothing to rest")
-		return false
-	var played_fresh: Array = player["played_fresh"]
-	var count := played.size()
-	for i in count:
-		var returned_id: String = played[i]
-		var was_fresh: bool = played_fresh[i]
-		_add_to_hand(player, returned_id, was_fresh)
-	played.clear()
-	played_fresh.clear()
-	actions_left -= 1
-	var noun := "card" if count == 1 else "cards"
-	_public("%s rested: %d %s back to hand" % [player["name"], count, noun])
-	_maybe_notebook(player)
-	state_changed.emit()
-	return true
-
-
 func end_turn() -> void:
 	if players.is_empty():
 		print("Refused: game has not started")
@@ -432,80 +468,317 @@ func end_turn() -> void:
 		print("Refused: finish the current choice first")
 		return
 	var player := current_player()
-	var fresh: Array = player["fresh"]
-	for i in fresh.size():
-		fresh[i] = false
-	var played_fresh: Array = player["played_fresh"]
-	for i in played_fresh.size():
-		played_fresh[i] = false
-	found_card_ids.clear()
-	var unused := actions_left
-	var noun := "action" if unused == 1 else "actions"
-	_public("%s ended turn with %d %s unused" % [player["name"], unused, noun])
-	current_index = (current_index + 1) % players.size()
-	actions_left = ACTIONS_PER_TURN
-	current_player()["lure_used"] = false
-	print("--- %s's turn ---" % current_player()["name"])
-	state_changed.emit()
-
-
-func _resolve_lure(label: String) -> void:
-	if label != "Top" and label != "Bottom":
+	if _maybe_notebook(player):
+		_pending_end = true
 		return
-	var hand_index := int(prompt["hand_index"])
-	var card_id := str(prompt["card_id"])
-	var tile_id := str(prompt["tile_id"])
-	var from_bottom := label == "Bottom"
-	if from_bottom:
-		current_player()["lure_used"] = true
-	_close_prompt()
-	_resolve_search(hand_index, card_id, from_bottom, tile_id)
+	_advance_turn()
 
 
-func _resolve_search(hand_index: int, card_id: String, from_bottom: bool, source_tile: String) -> bool:
-	if not _hand_has(hand_index) or str(current_player()["hand"][hand_index]) != card_id:
-		print("Refused: no card there")
-		return false
-	if _refuse_unplayable(hand_index):
+func market_sell(resource_hand_index: int) -> bool:
+	if market_visit.is_empty():
+		print("Refused: the market is not open")
 		return false
 	var player := current_player()
-	var tile_id := source_tile if source_tile != "" else str(player["tile"])
-	if card_id == "grappling_claw":
-		if tile_id not in get_claw_targets():
-			print("Refused: no deck there")
-			return false
-	elif deck_count(tile_id) <= 0:
-		print("Refused: %s" % _deck_here_reason())
+	var hand: Array = player["hand"]
+	if resource_hand_index < 0 or resource_hand_index >= hand.size():
+		print("Refused: no card there")
 		return false
-	if card_id == "fishing_net":
-		from_bottom = true
-	if card_id == "metal_detector":
-		return _metal_detector(player, hand_index, tile_id, from_bottom)
+	var card_id := str(hand[resource_hand_index])
+	var card := CardData.get_card(card_id)
+	if int(card["kind"]) != CardData.Kind.RESOURCE:
+		print("Refused: only resources can be sold")
+		return false
+	_take_from_hand(player, resource_hand_index)
+	player["gold"] = int(player["gold"]) + MARKET_SELL_PRICE
+	market_visit["sold"] = int(market_visit["sold"]) + 1
+	state_changed.emit()
+	return true
+
+
+func market_buy(offer_slot: int) -> bool:
+	if market_visit.is_empty():
+		print("Refused: the market is not open")
+		return false
+	var player := current_player()
+	var offer: Array = player["market_offer"]
+	if offer_slot < 0 or offer_slot >= offer.size():
+		print("Refused: no card there")
+		return false
+	var card_id := str(offer[offer_slot])
+	if card_id == "":
+		print("Refused: that card was already sold")
+		return false
+	if int(player["gold"]) < MARKET_BUY_PRICE:
+		print("Refused: not enough gold")
+		return false
+	offer[offer_slot] = ""
+	player["gold"] = int(player["gold"]) - MARKET_BUY_PRICE
+	_add_to_hand(player, card_id)
+	var bought: Array = market_visit["bought"]
+	bought.append(card_id)
+	state_changed.emit()
+	return true
+
+
+func market_has_traded() -> bool:
+	if market_visit.is_empty():
+		return false
+	var bought: Array = market_visit["bought"]
+	return int(market_visit["sold"]) > 0 or not bought.is_empty()
+
+
+func market_finish() -> bool:
+	if market_visit.is_empty():
+		return false
+	var player := current_player()
+	var sold_count := int(market_visit["sold"])
+	var bought: Array = market_visit["bought"]
+	var traded := sold_count > 0 or not bought.is_empty()
+	if traded and actions_left > 0:
+		actions_left -= 1
+		_public(_market_log(player, sold_count, bought))
+	market_visit = {}
+	state_changed.emit()
+	return traded
+
+
+func refresh_market_offer(player: Dictionary) -> void:
+	var pool := CardData.market_pool()
+	var offer: Array[String] = []
+	for _slot in MARKET_OFFER_SIZE:
+		offer.append(pool[randi() % pool.size()])
+	player["market_offer"] = offer
+	_secret("%s market offer: %s" % [str(player["name"]), _name_list(offer)])
+
+
+func _advance_turn() -> void:
+	_pending_end = false
+	var unused := actions_left
+	var noun := "action" if unused == 1 else "actions"
+	_public("%s ended turn with %d %s unused" % [current_player()["name"], unused, noun])
+	found_card_ids.clear()
+	current_index = (current_index + 1) % players.size()
+	actions_left = ACTIONS_PER_TURN
+	var starting := current_player()
+	starting["gear_used_this_turn"] = []
+	starting["lure_used_this_turn"] = false
+	print("--- %s's turn ---" % starting["name"])
+	state_changed.emit()
+	turn_ended.emit()
+
+
+func _prepare_ability(hand_index: int) -> bool:
+	if _is_busy():
+		print("Refused: finish the current choice first")
+		return false
+	if not _hand_has(hand_index):
+		print("Refused: no card there")
+		return false
+	if int(_card_at(hand_index)["kind"]) != CardData.Kind.ABILITY:
+		print("Refused: that card cannot be played")
+		return false
+	if not can_play_card(hand_index):
+		var reason := play_reason(hand_index)
+		print("Refused: %s" % (reason if reason != "" else "that card cannot be played"))
+		return false
+	return true
+
+
+func _ability_block_reason(card: Dictionary) -> String:
+	var card_id := str(card["id"])
+	if card_id == "grappling_claw":
+		if get_claw_targets().is_empty():
+			return "No deck next to you"
+		return ""
 	if card_id == "alien_tracker":
-		return _alien_tracker(player, hand_index, tile_id)
-	if card_id == "ancient_trowel":
-		return _ancient_trowel(player, hand_index, tile_id, from_bottom)
-	if card_id == "cargo_manifest":
-		return _cargo_manifest(player, hand_index, tile_id, from_bottom)
-	return _draw_one(player, hand_index, tile_id, card_id, from_bottom)
+		if _decks_with_cards().is_empty():
+			return "No deck to look at"
+		return ""
+	if card_id == "scrap_hoverboard":
+		var far: Array[String] = _reachable(str(current_player()["tile"]), move_paths(current_player()), 2)
+		if far.is_empty():
+			return "No reachable tiles"
+		return ""
+	if card_id == "patchwork_glider":
+		var near: Array[String] = _reachable(str(current_player()["tile"]), ANY_PATH, 1)
+		if near.is_empty():
+			return "No reachable tiles"
+		return ""
+	return _deck_here_reason()
 
 
-func _draw_one(player: Dictionary, hand_index: int, tile_id: String, card_id: String, from_bottom: bool) -> bool:
-	var deck: Array = decks[tile_id]
-	var drawn := str(_pull(deck, from_bottom))
-	_pay(player, hand_index)
-	_add_to_hand(player, drawn, true)
+func _resolve_move_ability(hand_index: int, destination: String) -> bool:
+	var destinations := ability_destinations(hand_index)
+	if destination not in destinations:
+		print("Refused: can't reach that tile")
+		return false
+	var player := current_player()
+	var card := _commit_ability(player, hand_index)
+	var from_tile: String = player["tile"]
+	player["tile"] = destination
+	_public("%s played %s (%s → %s)" % [
+		player["name"],
+		card["name"],
+		_tile_name(from_tile),
+		_tile_name(destination),
+	])
+	if destination == START_TILE and from_tile != START_TILE:
+		refresh_market_offer(player)
+	_maybe_map(player, destination)
+	state_changed.emit()
+	return true
+
+
+func _resolve_claw(hand_index: int, tile_id: String, from_bottom: bool) -> bool:
+	if not _hand_has(hand_index) or str(current_player()["hand"][hand_index]) != "grappling_claw":
+		print("Refused: no card there")
+		return false
+	if tile_id not in get_claw_targets():
+		print("Refused: no deck there")
+		return false
+	var player := current_player()
+	var drawn := _pull(decks[tile_id], from_bottom)
+	_commit_ability(player, hand_index)
+	_add_to_hand(player, drawn)
 	found_card_ids.append(drawn)
-	_announce_search(player, tile_id, card_id)
+	_public("%s played Grappling Claw (from %s)" % [player["name"], _tile_name(tile_id)])
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
 	state_changed.emit()
 	return true
 
 
-func _metal_detector(player: Dictionary, hand_index: int, tile_id: String, from_bottom: bool) -> bool:
+func _resolve_search_ability(hand_index: int, card_id: String, from_bottom: bool, tile_id: String) -> bool:
+	if not _hand_has(hand_index) or str(current_player()["hand"][hand_index]) != card_id:
+		print("Refused: no card there")
+		return false
+	if deck_count(tile_id) <= 0:
+		print("Refused: %s" % _deck_here_reason())
+		return false
+	var player := current_player()
+	if card_id == "fishing_net":
+		return _fishing_net(player, hand_index, tile_id)
+	if card_id == "ancient_trowel":
+		return _ancient_trowel(player, hand_index, tile_id, from_bottom)
+	if card_id == "cargo_manifest":
+		return _cargo_manifest(player, hand_index, tile_id, from_bottom)
+	print("Refused: that card cannot be played")
+	return false
+
+
+func _perform_base_search(from_bottom: bool) -> bool:
+	var player := current_player()
+	var tile_id := str(player["tile"])
+	if deck_count(tile_id) <= 0:
+		print("Refused: %s" % _deck_here_reason())
+		return false
+	var drawn := _pull(decks[tile_id], from_bottom)
+	actions_left -= 1
+	_add_to_hand(player, drawn)
+	found_card_ids.append(drawn)
+	_public("%s searched %s" % [player["name"], _tile_name(tile_id)])
+	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
+	state_changed.emit()
+	return true
+
+
+func _fishing_net(player: Dictionary, hand_index: int, tile_id: String) -> bool:
+	var deck: Array = decks[tile_id]
+	var drawn: Array[String] = []
+	var pulls: int = mini(2, deck.size())
+	for _i in pulls:
+		drawn.append(_pull(deck, true))
+	_commit_ability(player, hand_index)
+	for card_id in drawn:
+		_add_to_hand(player, card_id)
+		found_card_ids.append(card_id)
+		_secret("%s drew: %s" % [player["name"], CardData.get_card(card_id)["name"]])
+	_public("%s played Fishing Net" % player["name"])
+	state_changed.emit()
+	return true
+
+
+func _ancient_trowel(player: Dictionary, hand_index: int, tile_id: String, from_bottom: bool) -> bool:
+	var deck: Array = decks[tile_id]
+	var drawn: Array[String] = []
+	var pulls: int = mini(2, deck.size())
+	for _i in pulls:
+		drawn.append(_pull(deck, from_bottom))
+	var revealed_first := false
+	for i in pulls:
+		if CardData.is_resource(drawn[i]):
+			revealed_first = true
+	if revealed_first and not deck.is_empty():
+		drawn.append(_pull(deck, from_bottom))
+	_commit_ability(player, hand_index)
+	for i in drawn.size():
+		var card_id: String = drawn[i]
+		_add_to_hand(player, card_id)
+		found_card_ids.append(card_id)
+		if i < pulls and CardData.is_resource(card_id):
+			_public("%s revealed %s (Ancient Trowel)" % [player["name"], CardData.get_card(card_id)["name"]])
+		else:
+			_secret("%s drew: %s" % [player["name"], CardData.get_card(card_id)["name"]])
+	_public("%s played Ancient Trowel" % player["name"])
+	state_changed.emit()
+	return true
+
+
+func _cargo_manifest(player: Dictionary, hand_index: int, tile_id: String, from_bottom: bool) -> bool:
+	var deck: Array = decks[tile_id]
+	var drawn := _pull(deck, from_bottom)
+	_commit_ability(player, hand_index)
+	_add_to_hand(player, drawn)
+	found_card_ids.append(drawn)
+	_public("%s played Cargo Manifest" % player["name"])
+	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
+	var shown := _next_pair(deck, from_bottom)
+	state_changed.emit()
+	if shown.is_empty():
+		return true
+	var buttons: Array[String] = []
+	if shown.size() > 1:
+		buttons.append("Swap order")
+	buttons.append("Done")
+	_open_prompt({
+		"kind": "reorder",
+		"title": "Cargo Manifest",
+		"message": "The next cards of the %s deck. Put them back in any order." % _tile_name(tile_id),
+		"cards": shown,
+		"clickable": false,
+		"buttons": buttons,
+		"tile_id": tile_id,
+		"from_bottom": from_bottom,
+	})
+	return true
+
+
+func _finish_gear_use(slot: int, from_bottom: bool) -> bool:
+	var player := current_player()
+	var gear: Array = player["gear"]
+	if slot < 0 or slot >= gear.size():
+		print("Refused: no gear there")
+		return false
+	var card_id := str(gear[slot])
+	if card_id != "metal_detector":
+		print("Refused: that gear cannot be used")
+		return false
+	if deck_count(str(player["tile"])) <= 0:
+		print("Refused: %s" % _deck_here_reason())
+		return false
+	var used: Array = player["gear_used_this_turn"]
+	if card_id not in used:
+		used.append(card_id)
+	actions_left -= 1
+	_public("%s used Metal Detector" % player["name"])
+	var tile_id := str(player["tile"])
 	var deck: Array = decks[tile_id]
 	if deck.size() < 2:
-		return _draw_one(player, hand_index, tile_id, "metal_detector", from_bottom)
+		var drawn := _pull(deck, from_bottom)
+		_add_to_hand(player, drawn)
+		found_card_ids.append(drawn)
+		_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
+		state_changed.emit()
+		return true
 	var shown: Array[String] = []
 	if from_bottom:
 		shown.append(str(deck[deck.size() - 1]))
@@ -513,7 +786,6 @@ func _metal_detector(player: Dictionary, hand_index: int, tile_id: String, from_
 	else:
 		shown.append(str(deck[0]))
 		shown.append(str(deck[1]))
-	_pay(player, hand_index)
 	state_changed.emit()
 	_open_prompt({
 		"kind": "keep_one",
@@ -528,18 +800,55 @@ func _metal_detector(player: Dictionary, hand_index: int, tile_id: String, from_
 	return true
 
 
-func _alien_tracker(player: Dictionary, hand_index: int, tile_id: String) -> bool:
+func _ask_tracker(hand_index: int) -> bool:
+	var buttons: Array[String] = []
+	var tile_for: Dictionary = {}
+	for tile_id in _decks_with_cards():
+		var deck_label := _tile_name(tile_id)
+		buttons.append(deck_label)
+		tile_for[deck_label] = tile_id
+	if buttons.is_empty():
+		print("Refused: No deck to look at")
+		return false
+	_open_prompt({
+		"kind": "tracker_pick",
+		"title": "Alien Tracker",
+		"message": "Look at the top 3 cards of which deck?",
+		"cards": [],
+		"clickable": false,
+		"buttons": buttons,
+		"tile_for": tile_for,
+		"hand_index": hand_index,
+	})
+	return true
+
+
+func _resolve_tracker(label: String) -> void:
+	var tile_for: Dictionary = prompt["tile_for"]
+	var hand_index := int(prompt["hand_index"])
+	if not tile_for.has(label):
+		_close_prompt()
+		return
+	var tile_id := str(tile_for[label])
+	_close_prompt()
+	if not _hand_has(hand_index) or str(current_player()["hand"][hand_index]) != "alien_tracker":
+		print("Refused: no card there")
+		return
+	if deck_count(tile_id) <= 0:
+		print("Refused: This deck is empty")
+		return
+	var player := current_player()
 	var deck: Array = decks[tile_id]
 	var shown: Array[String] = []
 	var count: int = mini(3, deck.size())
 	var saw_alien := false
 	for i in count:
-		var card_id := str(deck[i])
-		shown.append(card_id)
-		if CardData.is_alien(card_id):
+		var seen_id := str(deck[i])
+		shown.append(seen_id)
+		if CardData.is_alien(seen_id):
 			saw_alien = true
-	_pay(player, hand_index)
-	_announce_search(player, tile_id, "alien_tracker")
+	_commit_ability(player, hand_index)
+	_public("%s played Alien Tracker" % player["name"])
 	if saw_alien:
 		player["purple"] = int(player["purple"]) + 1
 		_public("%s gained 1 purple (Alien Tracker)" % player["name"])
@@ -553,47 +862,60 @@ func _alien_tracker(player: Dictionary, hand_index: int, tile_id: String) -> boo
 		"clickable": false,
 		"buttons": ["Done"],
 	})
-	return true
 
 
-func _ancient_trowel(player: Dictionary, hand_index: int, tile_id: String, from_bottom: bool) -> bool:
-	var deck: Array = decks[tile_id]
-	var drawn := str(_pull(deck, from_bottom))
-	_pay(player, hand_index)
-	_add_to_hand(player, drawn, true)
-	found_card_ids.append(drawn)
-	var drawn_card := CardData.get_card(drawn)
-	var revealed := int(drawn_card["kind"]) == CardData.Kind.RESOURCE
-	if revealed and not deck.is_empty():
-		var extra := str(_pull(deck, from_bottom))
-		_add_to_hand(player, extra, true)
-		found_card_ids.append(extra)
-		_secret("%s drew: %s" % [player["name"], CardData.get_card(extra)["name"]])
-	elif not revealed:
-		_secret("%s drew: %s" % [player["name"], drawn_card["name"]])
-	_announce_search(player, tile_id, "ancient_trowel")
-	if revealed:
-		_public("%s revealed %s (Ancient Trowel)" % [player["name"], drawn_card["name"]])
-	state_changed.emit()
-	return true
+func _resolve_lure(label: String) -> void:
+	if label != "Top" and label != "Bottom":
+		return
+	var mode := str(prompt["mode"])
+	var hand_index := int(prompt["hand_index"])
+	var card_id := str(prompt["card_id"])
+	var tile_id := str(prompt["tile_id"])
+	var slot := int(prompt["slot"])
+	var from_bottom := label == "Bottom"
+	if from_bottom:
+		current_player()["lure_used_this_turn"] = true
+	_close_prompt()
+	if mode == "base":
+		_perform_base_search(from_bottom)
+	elif mode == "gear":
+		_finish_gear_use(slot, from_bottom)
+	elif card_id == "grappling_claw":
+		_resolve_claw(hand_index, tile_id, from_bottom)
+	else:
+		_resolve_search_ability(hand_index, card_id, from_bottom, tile_id)
 
 
-func _cargo_manifest(player: Dictionary, hand_index: int, tile_id: String, from_bottom: bool) -> bool:
-	_draw_one(player, hand_index, tile_id, "cargo_manifest", from_bottom)
-	var deck: Array = decks[tile_id]
-	if deck.is_empty():
-		return true
-	var nxt := str(_peek_at(deck, from_bottom))
-	_secret("%s saw next: %s" % [player["name"], CardData.get_card(nxt)["name"]])
+func _ask_lure(mode: String, hand_index: int, card_id: String, tile_id: String, slot: int) -> void:
 	_open_prompt({
-		"kind": "peek",
-		"title": "Cargo Manifest",
-		"message": "The next card of this deck is…",
-		"cards": [nxt],
+		"kind": "lure",
+		"title": "Lucky Lure",
+		"message": "Lucky Lure: draw from the Top or the Bottom?",
+		"cards": [],
 		"clickable": false,
-		"buttons": ["Done"],
+		"buttons": ["Top", "Bottom"],
+		"mode": mode,
+		"hand_index": hand_index,
+		"card_id": card_id,
+		"tile_id": tile_id,
+		"slot": slot,
 	})
-	return true
+
+
+func _lure_applies() -> bool:
+	var player := current_player()
+	if bool(player["lure_used_this_turn"]):
+		return false
+	return _wearing(player, "lucky_lure")
+
+
+func _move_to(player: Dictionary, destination: String) -> void:
+	var from_tile: String = player["tile"]
+	player["tile"] = destination
+	_public("%s moved %s → %s" % [player["name"], _tile_name(from_tile), _tile_name(destination)])
+	if destination == START_TILE and from_tile != START_TILE:
+		refresh_market_offer(player)
+	_maybe_map(player, destination)
 
 
 func _maybe_map(player: Dictionary, tile_id: String) -> void:
@@ -612,12 +934,12 @@ func _maybe_map(player: Dictionary, tile_id: String) -> void:
 	})
 
 
-func _maybe_notebook(player: Dictionary) -> void:
+func _maybe_notebook(player: Dictionary) -> bool:
 	if not _wearing(player, "scholars_notebook"):
-		return
+		return false
 	var tile_id := str(player["tile"])
 	if deck_count(tile_id) <= 0:
-		return
+		return false
 	var deck: Array = decks[tile_id]
 	var shown: Array[String] = []
 	var count: int = mini(2, deck.size())
@@ -637,20 +959,30 @@ func _maybe_notebook(player: Dictionary) -> void:
 		"clickable": false,
 		"buttons": buttons,
 		"tile_id": tile_id,
+		"from_bottom": false,
 	})
+	return true
 
 
-func _swap_notebook() -> void:
+func _swap_visible_pair() -> void:
 	var tile_id := str(prompt["tile_id"])
+	var from_bottom: bool = bool(prompt.get("from_bottom", false))
 	var deck: Array = decks[tile_id]
 	if deck.size() < 2:
 		return
-	var first := str(deck[0])
-	deck[0] = deck[1]
-	deck[1] = first
-	var shown: Array[String] = [str(deck[0]), str(deck[1])]
-	prompt["cards"] = shown
-	_secret("%s swapped the %s deck: %s" % [current_player()["name"], _tile_name(tile_id), _name_list(shown)])
+	if from_bottom:
+		var last := deck.size() - 1
+		var swap_a: String = deck[last]
+		deck[last] = deck[last - 1]
+		deck[last - 1] = swap_a
+		prompt["cards"] = [str(deck[last]), str(deck[last - 1])]
+	else:
+		var swap_top: String = deck[0]
+		deck[0] = deck[1]
+		deck[1] = swap_top
+		prompt["cards"] = [str(deck[0]), str(deck[1])]
+	var shown: Array = prompt["cards"]
+	_secret("%s reordered the %s deck: %s" % [current_player()["name"], _tile_name(tile_id), _name_list(shown)])
 	prompt_opened.emit(prompt)
 
 
@@ -682,39 +1014,67 @@ func _resolve_radio(label: String) -> void:
 	})
 
 
-func _ask_lure(hand_index: int, card_id: String, tile_id: String) -> void:
-	_open_prompt({
-		"kind": "lure",
-		"title": "Lucky Lure",
-		"message": "Lucky Lure: draw from the Top or the Bottom?",
-		"cards": [],
-		"clickable": false,
-		"buttons": ["Top", "Bottom"],
-		"hand_index": hand_index,
-		"card_id": card_id,
-		"tile_id": tile_id,
-	})
+func _commit_ability(player: Dictionary, hand_index: int) -> Dictionary:
+	var card := CardData.get_card(str(player["hand"][hand_index]))
+	_discard_from_hand(player, hand_index)
+	actions_left -= 1
+	return card
 
 
-func _wants_lure(card_id: String) -> bool:
-	if card_id not in LURE_SEARCHES:
-		return false
-	var player := current_player()
-	if bool(player["lure_used"]):
-		return false
-	return _wearing(player, "lucky_lure")
+func _discard_from_hand(player: Dictionary, hand_index: int) -> String:
+	var card_id := _take_from_hand(player, hand_index)
+	discard.append(card_id)
+	return card_id
 
 
-func _announce_search(player: Dictionary, tile_id: String, card_id: String) -> void:
-	var tile_name := _tile_name(tile_id)
-	var card_name: String = CardData.get_card(card_id)["name"]
-	var left := deck_count(tile_id)
-	if card_id == "grappling_claw":
-		print("%s grabbed from %s with %s (deck: %d left)" % [player["name"], tile_name, card_name, left])
-		_log_only("%s grabbed from %s (%s)" % [player["name"], tile_name, card_name])
+func _next_pair(deck: Array, from_bottom: bool) -> Array[String]:
+	var shown: Array[String] = []
+	if deck.is_empty():
+		return shown
+	if from_bottom:
+		shown.append(str(deck[deck.size() - 1]))
+		if deck.size() > 1:
+			shown.append(str(deck[deck.size() - 2]))
 	else:
-		print("%s searched %s with %s (deck: %d left)" % [player["name"], tile_name, card_name, left])
-		_log_only("%s searched %s (%s)" % [player["name"], tile_name, card_name])
+		shown.append(str(deck[0]))
+		if deck.size() > 1:
+			shown.append(str(deck[1]))
+	return shown
+
+
+func _decks_with_cards() -> Array[String]:
+	var found: Array[String] = []
+	for tile_id in SEARCH_TILES:
+		if deck_count(tile_id) > 0:
+			found.append(tile_id)
+	return found
+
+
+func _deck_here_reason() -> String:
+	var tile_id := str(current_player()["tile"])
+	if not decks.has(tile_id):
+		return "No deck here"
+	var deck: Array = decks[tile_id]
+	if deck.is_empty():
+		return "This deck is empty"
+	return ""
+
+
+func _market_log(player: Dictionary, sold_count: int, bought: Array) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	if sold_count > 0:
+		var noun := "resource" if sold_count == 1 else "resources"
+		parts.append("sold %d %s (+%d)" % [sold_count, noun, sold_count * MARKET_SELL_PRICE])
+	if not bought.is_empty():
+		var names: PackedStringArray = PackedStringArray()
+		for card_id in bought:
+			names.append(str(CardData.get_card(str(card_id))["name"]))
+		parts.append("bought %s (-%d)" % [", ".join(names), bought.size() * MARKET_BUY_PRICE])
+	return "%s at the market: %s" % [str(player["name"]), ", ".join(parts)]
+
+
+func _is_busy() -> bool:
+	return not prompt.is_empty() or not market_visit.is_empty()
 
 
 func _reachable(start: String, allowed: Array, steps: int) -> Array[String]:
@@ -737,176 +1097,10 @@ func _reachable(start: String, allowed: Array, steps: int) -> Array[String]:
 	return destinations
 
 
-func _search_block_reason_for(card: Dictionary) -> String:
-	if str(card["id"]) == "grappling_claw":
-		if get_claw_targets().is_empty():
-			return "No deck next to you"
-		return ""
-	return _deck_here_reason()
-
-
-func _deck_here_reason() -> String:
-	var tile_id := str(current_player()["tile"])
-	if not decks.has(tile_id):
-		return "No deck here"
-	var deck: Array = decks[tile_id]
-	if deck.is_empty():
-		return "This deck is empty"
-	return ""
-
-
-func refresh_market_offer(player: Dictionary) -> void:
-	var pool := CardData.market_pool()
-	var offer: Array[String] = []
-	for _slot in MARKET_OFFER_SIZE:
-		offer.append(pool[randi() % pool.size()])
-	player["market_offer"] = offer
-	_secret("%s market offer: %s" % [str(player["name"]), _name_list(offer)])
-
-
-func begin_market(hand_index: int) -> bool:
-	if _refuse_unplayable(hand_index):
-		return false
-	var card := _card_at(hand_index)
-	if int(card["kind"]) != CardData.Kind.ACTION or int(card["action"]) != CardData.ActionType.INTERACT:
-		print("Refused: that card cannot interact")
-		return false
-	var bought: Array[String] = []
-	market_visit = {
-		"hand_index": hand_index,
-		"card_id": str(card["id"]),
-		"sold": 0,
-		"bought": bought,
-	}
-	return true
-
-
-func market_sell(resource_hand_index: int) -> bool:
-	if market_visit.is_empty():
-		print("Refused: the market is not open")
-		return false
-	var player := current_player()
-	var hand: Array = player["hand"]
-	if resource_hand_index < 0 or resource_hand_index >= hand.size():
-		print("Refused: no card there")
-		return false
-	var card_id := str(hand[resource_hand_index])
-	var card := CardData.get_card(card_id)
-	if int(card["kind"]) != CardData.Kind.RESOURCE:
-		print("Refused: only resources can be sold")
-		return false
-	_take_from_hand(player, resource_hand_index)
-	player["gold"] = int(player["gold"]) + MARKET_SELL_PRICE
-	market_visit["sold"] = int(market_visit["sold"]) + 1
-	if resource_hand_index < int(market_visit["hand_index"]):
-		market_visit["hand_index"] = int(market_visit["hand_index"]) - 1
-	state_changed.emit()
-	return true
-
-
-func market_buy(offer_slot: int) -> bool:
-	if market_visit.is_empty():
-		print("Refused: the market is not open")
-		return false
-	var player := current_player()
-	var offer: Array = player["market_offer"]
-	if offer_slot < 0 or offer_slot >= offer.size():
-		print("Refused: no card there")
-		return false
-	var card_id := str(offer[offer_slot])
-	if card_id == "":
-		print("Refused: that card was already sold")
-		return false
-	if int(player["gold"]) < MARKET_BUY_PRICE:
-		print("Refused: not enough gold")
-		return false
-	offer[offer_slot] = ""
-	player["gold"] = int(player["gold"]) - MARKET_BUY_PRICE
-	_add_to_hand(player, card_id, false)
-	var bought: Array = market_visit["bought"]
-	bought.append(card_id)
-	state_changed.emit()
-	return true
-
-
-func market_has_traded() -> bool:
-	if market_visit.is_empty():
-		return false
-	var bought: Array = market_visit["bought"]
-	return int(market_visit["sold"]) > 0 or not bought.is_empty()
-
-
-func market_finish() -> bool:
-	if market_visit.is_empty():
-		return false
-	var player := current_player()
-	var sold_count := int(market_visit["sold"])
-	var bought: Array = market_visit["bought"]
-	var traded := sold_count > 0 or not bought.is_empty()
-	if traded:
-		var hand_index := int(market_visit["hand_index"])
-		var card_id := str(market_visit["card_id"])
-		var hand: Array = player["hand"]
-		if hand_index < 0 or hand_index >= hand.size() or str(hand[hand_index]) != card_id:
-			var found: int = int(hand.find(card_id))
-			hand_index = found
-		if hand_index >= 0:
-			_pay(player, hand_index)
-		_public(_market_log(player, sold_count, bought))
-	market_visit = {}
-	state_changed.emit()
-	return traded
-
-
-func _market_log(player: Dictionary, sold_count: int, bought: Array) -> String:
-	var parts: PackedStringArray = PackedStringArray()
-	if sold_count > 0:
-		var noun := "resource" if sold_count == 1 else "resources"
-		parts.append("sold %d %s (+%d)" % [sold_count, noun, sold_count * MARKET_SELL_PRICE])
-	if not bought.is_empty():
-		var names: PackedStringArray = PackedStringArray()
-		for card_id in bought:
-			names.append(str(CardData.get_card(str(card_id))["name"]))
-		parts.append("bought %s (-%d)" % [", ".join(names), bought.size() * MARKET_BUY_PRICE])
-	return "%s at the market: %s" % [str(player["name"]), ", ".join(parts)]
-
-
-func _is_busy() -> bool:
-	return not prompt.is_empty() or not market_visit.is_empty()
-
-
-func _refuse_unplayable(hand_index: int) -> bool:
-	if _is_busy():
-		print("Refused: finish the current choice first")
-		return true
-	if not _hand_has(hand_index):
-		print("Refused: no card there")
-		return true
-	var reason := play_reason(hand_index)
-	if reason != "":
-		print("Refused: %s" % reason)
-		return true
-	if not can_play_card(hand_index):
-		print("Refused: that card cannot be played")
-		return true
-	return false
-
-
-func _pay(player: Dictionary, hand_index: int) -> void:
-	_spend_card(player, hand_index)
-	actions_left -= 1
-
-
 func _pull(deck: Array, from_bottom: bool) -> String:
 	if from_bottom:
 		return str(deck.pop_back())
 	return str(deck.pop_front())
-
-
-func _peek_at(deck: Array, from_bottom: bool) -> String:
-	if from_bottom:
-		return str(deck[deck.size() - 1])
-	return str(deck[0])
 
 
 func _open_prompt(data: Dictionary) -> void:
@@ -923,10 +1117,6 @@ func _close_prompt() -> void:
 
 func _public(text: String) -> void:
 	print(text)
-	_log_only(text)
-
-
-func _log_only(text: String) -> void:
 	public_log.insert(0, text)
 
 
@@ -951,32 +1141,15 @@ func _card_at(hand_index: int) -> Dictionary:
 	return CardData.get_card(card_id)
 
 
-func _spend_card(player: Dictionary, hand_index: int) -> void:
-	var taken := _take_from_hand(player, hand_index)
-	player["played"].append(taken["id"])
-	player["played_fresh"].append(taken["fresh"])
-
-
-func _take_from_hand(player: Dictionary, hand_index: int) -> Dictionary:
+func _take_from_hand(player: Dictionary, hand_index: int) -> String:
 	var hand: Array = player["hand"]
-	var fresh: Array = player["fresh"]
 	var card_id: String = hand[hand_index]
-	var was_fresh: bool = fresh[hand_index]
 	hand.remove_at(hand_index)
-	fresh.remove_at(hand_index)
-	return {"id": card_id, "fresh": was_fresh}
+	return card_id
 
 
-func _add_to_hand(player: Dictionary, card_id: String, is_fresh: bool) -> void:
+func _add_to_hand(player: Dictionary, card_id: String) -> void:
 	player["hand"].append(card_id)
-	player["fresh"].append(is_fresh)
-
-
-func _path_between(from_id: String, to_id: String, allowed: Array) -> int:
-	for neighbor in BoardData.get_neighbors(from_id):
-		if neighbor["tile"] == to_id and _path_allowed(neighbor["path"], allowed):
-			return int(neighbor["path"])
-	return -1
 
 
 func _path_allowed(path, allowed: Array) -> bool:

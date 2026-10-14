@@ -3,6 +3,7 @@ extends Node2D
 var game := GameState.new()
 var _selected_hand_index := -1
 var _gear_replace_index := -1
+var _selecting_move := false
 
 @onready var _board: GameBoard = $Board
 @onready var _seats: Control = $SeatLayer
@@ -31,7 +32,11 @@ func _ready() -> void:
 	_setup.player_count_chosen.connect(_on_player_count_chosen)
 	_seats.card_clicked.connect(_on_card_clicked)
 	_seats.gear_slot_clicked.connect(_on_gear_slot_clicked)
-	_seats.rest_pressed.connect(_on_rest)
+	_seats.gear_use_pressed.connect(_on_gear_use)
+	_seats.move_pressed.connect(_on_move)
+	_seats.search_pressed.connect(_on_search)
+	_seats.interact_pressed.connect(_on_interact)
+	_seats.fight_pressed.connect(_on_fight)
 	_seats.end_turn_pressed.connect(_on_end_turn)
 	_board.tile_clicked.connect(_on_tile_clicked)
 	_pass.dismissed.connect(_on_pass_dismissed)
@@ -44,6 +49,7 @@ func _ready() -> void:
 	game.state_changed.connect(_on_state_changed)
 	game.prompt_opened.connect(_on_prompt_opened)
 	game.prompt_closed.connect(_on_prompt_closed)
+	game.turn_ended.connect(_on_turn_ended)
 
 
 func _input(event: InputEvent) -> void:
@@ -60,13 +66,8 @@ func _input(event: InputEvent) -> void:
 		return
 	if not _is_cancel(event):
 		return
-	if _gear_replace_index >= 0:
-		_gear_replace_index = -1
-		_refresh_view()
-		get_viewport().set_input_as_handled()
-		return
-	if _selected_hand_index >= 0:
-		_clear_move_selection()
+	if _gear_replace_index >= 0 or _selected_hand_index >= 0 or _selecting_move:
+		_clear_selection()
 		get_viewport().set_input_as_handled()
 
 
@@ -90,106 +91,128 @@ func _refresh_view() -> void:
 	if game.players.is_empty():
 		return
 	_hud.refresh_log(game)
-	_seats.refresh(game, _selected_hand_index, _gear_replace_index)
+	_seats.refresh(game, _selected_hand_index, _gear_replace_index, _selecting_move)
 
 
 func _on_card_clicked(hand_index: int) -> void:
+	_selecting_move = false
+	_board.clear_highlights()
 	_gear_replace_index = -1
 	var card_id: String = game.current_player()["hand"][hand_index]
 	var card: Dictionary = CardData.get_card(card_id)
 	var kind := int(card["kind"])
 	if kind == CardData.Kind.GEAR:
-		_clear_move_selection(false)
-		if not game.can_equip(hand_index):
+		if not game.can_play_card(hand_index):
+			_selected_hand_index = -1
 			_refresh_view()
 			return
 		if game.current_player()["gear"].size() >= GameState.GEAR_SLOTS:
+			_selected_hand_index = -1
 			_gear_replace_index = hand_index
 			_refresh_view()
 			return
 		_selected_hand_index = -1
-		game.equip_gear(hand_index, -1)
+		game.play_gear(hand_index)
 		return
 	if kind == CardData.Kind.RESOURCE:
-		_clear_move_selection(false)
+		_selected_hand_index = -1
 		_refresh_view()
 		return
 	if not game.can_play_card(hand_index):
-		_clear_move_selection(false)
+		_selected_hand_index = -1
 		_refresh_view()
 		return
-	if int(card["action"]) == CardData.ActionType.MOVE:
-		var destinations := game.get_move_destinations(hand_index)
-		if destinations.is_empty():
-			_clear_move_selection(false)
-			_refresh_view()
-			_seats.show_status("No reachable tiles with this card.")
-			return
+	if card_id == "scrap_hoverboard" or card_id == "patchwork_glider":
+		var destinations := game.ability_destinations(hand_index)
 		_selected_hand_index = hand_index
 		_board.set_highlighted_tiles(destinations)
 		_refresh_view()
 		return
-	_clear_move_selection(false)
+	if card_id == "grappling_claw":
+		var targets := game.get_claw_targets()
+		_selected_hand_index = hand_index
+		_board.set_highlighted_tiles(targets)
+		_refresh_view()
+		return
 	_selected_hand_index = -1
-	if int(card["action"]) == CardData.ActionType.SEARCH:
-		if card_id == "grappling_claw":
-			var targets := game.get_claw_targets()
-			if targets.is_empty():
-				_seats.show_status("No deck next to you.")
-				return
-			_selected_hand_index = hand_index
-			_board.set_highlighted_tiles(targets)
-			_refresh_view()
-			return
-		game.play_search_card(hand_index)
-	elif int(card["action"]) == CardData.ActionType.INTERACT:
-		if game.begin_market(hand_index):
-			_market.present(game)
-	else:
-		game.play_placeholder_card(hand_index)
+	game.play_ability(hand_index)
 
 
 func _on_tile_clicked(tile_id: String) -> void:
-	if _popup.visible or _market.visible or _gear_replace_index >= 0 or _selected_hand_index < 0:
+	if _popup.visible or _market.visible or _pass.visible or _setup.visible or _gear_replace_index >= 0:
 		return
-	var hand_index := _selected_hand_index
-	var card_id: String = game.current_player()["hand"][hand_index]
-	if card_id == "grappling_claw":
-		var targets := game.get_claw_targets()
-		if tile_id not in targets:
+	if _selected_hand_index >= 0:
+		var hand_index := _selected_hand_index
+		var card_id: String = game.current_player()["hand"][hand_index]
+		if card_id == "grappling_claw":
+			if tile_id not in game.get_claw_targets():
+				return
+			_clear_selection(false)
+			game.play_ability(hand_index, "", tile_id)
 			return
-		_clear_move_selection(false)
-		game.play_claw(hand_index, tile_id)
+		if tile_id not in game.ability_destinations(hand_index):
+			return
+		_clear_selection(false)
+		game.play_ability(hand_index, tile_id)
 		return
-	var destinations := game.get_move_destinations(hand_index)
-	if tile_id not in destinations:
+	if tile_id not in game.get_move_destinations():
 		return
-	_clear_move_selection(false)
-	game.play_move_card(hand_index, tile_id)
+	_selecting_move = false
+	_board.clear_highlights()
+	game.do_move(tile_id)
 
 
 func _on_gear_slot_clicked(slot_index: int) -> void:
 	var hand_index := _gear_replace_index
 	_gear_replace_index = -1
+	_selected_hand_index = -1
 	if hand_index < 0:
 		return
-	game.equip_gear(hand_index, slot_index)
+	game.play_gear(hand_index, slot_index)
 
 
-func _on_rest() -> void:
+func _on_gear_use(slot_index: int) -> void:
+	_clear_selection(false)
+	game.use_gear(slot_index)
+
+
+func _on_move() -> void:
 	_gear_replace_index = -1
-	_clear_move_selection(false)
-	if not game.rest():
+	_selected_hand_index = -1
+	if not game.can_move():
+		_selecting_move = false
+		_board.clear_highlights()
 		_refresh_view()
+		return
+	_selecting_move = true
+	_board.set_highlighted_tiles(game.get_move_destinations())
+	_refresh_view()
+
+
+func _on_search() -> void:
+	_clear_selection(false)
+	game.do_search()
+
+
+func _on_interact() -> void:
+	_clear_selection(false)
+	if game.do_interact():
+		_market.present(game)
+
+
+func _on_fight() -> void:
+	pass
 
 
 func _on_end_turn() -> void:
 	if not game.market_visit.is_empty():
 		return
-	_gear_replace_index = -1
-	_clear_move_selection(false)
+	_clear_selection(false)
 	game.end_turn()
-	if game.prompt.is_empty():
+
+
+func _on_turn_ended() -> void:
+	if game.prompt.is_empty() and not _pass.visible:
 		_pass.show_for(game.current_player())
 
 
@@ -230,9 +253,11 @@ func _close_market() -> void:
 	game.market_finish()
 
 
-func _clear_move_selection(refresh_hud: bool = true) -> void:
-	var had_selection := _selected_hand_index >= 0
+func _clear_selection(refresh_hud: bool = true) -> void:
+	var had_selection := _selected_hand_index >= 0 or _gear_replace_index >= 0 or _selecting_move
 	_selected_hand_index = -1
+	_gear_replace_index = -1
+	_selecting_move = false
 	_board.clear_highlights()
 	if refresh_hud and had_selection and not game.players.is_empty():
 		_refresh_view()
