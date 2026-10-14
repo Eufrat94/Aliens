@@ -5,11 +5,15 @@ signal state_changed
 signal prompt_opened(prompt: Dictionary)
 signal prompt_closed
 signal turn_ended
+signal skrim_announced(player_name: String)
+signal game_won(player_index: int)
 
 const ACTIONS_PER_TURN := 3
 const GEAR_SLOTS := 4
 const DEBUG_SHOW_SECRETS := true
 const DEBUG_GIVE_ALL_ITEMS := false
+const DEBUG_START_ALIENS := 0
+const ALIENS_TO_WIN := 5
 const STARTING_GOLD := 5
 const STARTING_RESOURCES := 2
 const MARKET_OFFER_SIZE := 3
@@ -41,6 +45,10 @@ var found_card_ids: Array[String] = []
 var public_log: Array[String] = []
 var prompt: Dictionary = {}
 var market_visit: Dictionary = {}
+var missing_alien := ""
+var crystal_pool := 0
+var game_over := false
+var winner_index := -1
 var _pending_end := false
 
 
@@ -66,13 +74,18 @@ func start_game(player_count: int) -> void:
 			"market_offer": [],
 			"purple": 0,
 			"lure_used_this_turn": false,
+			"aliens": [],
+			"checklist": _blank_checklist(),
 		})
 	decks = {}
 	for tile_id in SEARCH_TILES:
 		var deck: Array[String] = DeckData.build_deck(tile_id)
-		deck.shuffle()
 		decks[tile_id] = deck
 	discard = []
+	crystal_pool = 0
+	game_over = false
+	winner_index = -1
+	_deal_aliens()
 	for player in players:
 		refresh_market_offer(player)
 	current_index = 0
@@ -82,6 +95,7 @@ func start_game(player_count: int) -> void:
 	prompt = {}
 	market_visit = {}
 	_pending_end = false
+	_give_debug_aliens()
 	state_changed.emit()
 
 
@@ -122,10 +136,9 @@ func can_move() -> bool:
 
 
 func move_reason() -> String:
-	if _is_busy():
-		return "Finish the current choice first"
-	if actions_left <= 0:
-		return "No actions left"
+	var blocked := _turn_block()
+	if blocked != "":
+		return blocked
 	if get_move_destinations().is_empty():
 		return "Nowhere to move"
 	return ""
@@ -152,10 +165,9 @@ func can_search() -> bool:
 
 
 func search_reason() -> String:
-	if _is_busy():
-		return "Finish the current choice first"
-	if actions_left <= 0:
-		return "No actions left"
+	var blocked := _turn_block()
+	if blocked != "":
+		return blocked
 	return _deck_here_reason()
 
 
@@ -177,11 +189,15 @@ func can_interact() -> bool:
 
 
 func interact_reason() -> String:
-	if _is_busy():
-		return "Finish the current choice first"
-	if actions_left <= 0:
-		return "No actions left"
-	if not BoardData.has_interaction(str(current_player()["tile"])):
+	var blocked := _turn_block()
+	if blocked != "":
+		return blocked
+	var tile_id := str(current_player()["tile"])
+	if tile_id == "crystal_mount":
+		if crystal_pool <= 0:
+			return "The pool is empty"
+		return ""
+	if not BoardData.has_interaction(tile_id):
 		return "Nothing to interact with here"
 	return ""
 
@@ -193,6 +209,8 @@ func do_interact() -> bool:
 	if not can_interact():
 		print("Refused: %s" % interact_reason())
 		return false
+	if str(current_player()["tile"]) == "crystal_mount":
+		return _collect_crystal_pool()
 	var bought: Array[String] = []
 	market_visit = {"sold": 0, "bought": bought}
 	return true
@@ -215,10 +233,14 @@ func can_play_card(hand_index: int) -> bool:
 func play_reason(hand_index: int) -> String:
 	if not _hand_has(hand_index):
 		return ""
+	if game_over:
+		return "The game is over"
 	var card := _card_at(hand_index)
 	var kind := int(card["kind"])
 	if kind == CardData.Kind.RESOURCE:
 		return "Resources can't be played"
+	if kind == CardData.Kind.ALIEN and str(card.get("alien_mode", "")) == "unplayable":
+		return "Skrim can't be played"
 	if actions_left <= 0:
 		return "No actions left"
 	if kind == CardData.Kind.GEAR:
@@ -227,6 +249,8 @@ func play_reason(hand_index: int) -> String:
 		return ""
 	if kind == CardData.Kind.ABILITY:
 		return _ability_block_reason(card)
+	if kind == CardData.Kind.ALIEN:
+		return ""
 	return "That card cannot be played"
 
 
@@ -296,6 +320,50 @@ func play_gear(hand_index: int, replace_slot: int = -1) -> bool:
 	return true
 
 
+func play_alien(hand_index: int) -> bool:
+	if game_over:
+		print("Refused: the game is over")
+		return false
+	if _is_busy():
+		print("Refused: finish the current choice first")
+		return false
+	if not can_play_card(hand_index):
+		var reason := play_reason(hand_index)
+		print("Refused: %s" % (reason if reason != "" else "that card cannot be played"))
+		return false
+	var player := current_player()
+	var card := _card_at(hand_index)
+	if int(card["kind"]) != CardData.Kind.ALIEN:
+		print("Refused: that card cannot be played")
+		return false
+	var card_id := _take_from_hand(player, hand_index)
+	var aliens: Array = player["aliens"]
+	aliens.append(card_id)
+	crystal_pool += 1
+	actions_left -= 1
+	_public("%s played alien %s (+1 purple to Crystal mount)" % [player["name"], card["name"]])
+	_check_win()
+	state_changed.emit()
+	return true
+
+
+func alien_count(player: Dictionary) -> int:
+	var count := 0
+	var hand: Array = player["hand"]
+	for card_id in hand:
+		if CardData.is_alien(str(card_id)):
+			count += 1
+	var aliens: Array = player["aliens"]
+	return count + aliens.size()
+
+
+func set_checklist(alien_id: String, ticked: bool) -> void:
+	if players.is_empty() or game_over or not CardData.is_alien(alien_id):
+		return
+	var checks: Dictionary = current_player()["checklist"]
+	checks[alien_id] = ticked
+
+
 func play_ability(hand_index: int, destination: String = "", source_tile: String = "") -> bool:
 	if not _prepare_ability(hand_index):
 		return false
@@ -346,10 +414,9 @@ func gear_use_reason(slot: int) -> String:
 	var used: Array = current_player()["gear_used_this_turn"]
 	if card_id in used:
 		return "Used"
-	if _is_busy():
-		return "Finish the current choice first"
-	if actions_left <= 0:
-		return "No actions left"
+	var blocked := _turn_block()
+	if blocked != "":
+		return blocked
 	if card_id == "metal_detector":
 		return _deck_here_reason()
 	return ""
@@ -479,6 +546,9 @@ func begin_turn() -> void:
 func end_turn() -> void:
 	if players.is_empty():
 		print("Refused: game has not started")
+		return
+	if game_over:
+		print("Refused: the game is over")
 		return
 	if _is_busy():
 		print("Refused: finish the current choice first")
@@ -1093,6 +1163,101 @@ func _is_busy() -> bool:
 	return not prompt.is_empty() or not market_visit.is_empty()
 
 
+func _turn_block() -> String:
+	if game_over:
+		return "The game is over"
+	if _is_busy():
+		return "Finish the current choice first"
+	if actions_left <= 0:
+		return "No actions left"
+	return ""
+
+
+func _blank_checklist() -> Dictionary:
+	var checks := {}
+	for alien_id in CardData.all_alien_ids():
+		checks[alien_id] = false
+	return checks
+
+
+func _deal_aliens() -> void:
+	var ids: Array[String] = CardData.all_alien_ids()
+	ids.shuffle()
+	missing_alien = ids.pop_back()
+	_secret("Missing alien: %s" % str(CardData.get_card(missing_alien)["name"]))
+	var order: Array[String] = []
+	for tile_id in SEARCH_TILES:
+		order.append(tile_id)
+	var start := randi() % order.size()
+	for i in ids.size():
+		var tile_id: String = order[(start + i) % order.size()]
+		var deck: Array = decks[tile_id]
+		deck.append(ids[i])
+	for tile_id in SEARCH_TILES:
+		var deck: Array = decks[tile_id]
+		deck.shuffle()
+
+
+func _give_debug_aliens() -> void:
+	if DEBUG_START_ALIENS <= 0:
+		return
+	for player in players:
+		var who: Dictionary = player
+		var given := 0
+		while given < DEBUG_START_ALIENS and not game_over:
+			var card_id := _pull_random_alien()
+			if card_id == "":
+				return
+			_add_to_hand(who, card_id)
+			given += 1
+
+
+func _pull_random_alien() -> String:
+	var located: Array[String] = []
+	for tile_id in SEARCH_TILES:
+		var deck: Array = decks[tile_id]
+		for i in deck.size():
+			if CardData.is_alien(str(deck[i])):
+				located.append("%s:%d" % [tile_id, i])
+	if located.is_empty():
+		return ""
+	var pick := located[randi() % located.size()]
+	var split_at := pick.rfind(":")
+	var tile_id := pick.substr(0, split_at)
+	var index := int(pick.substr(split_at + 1))
+	var deck: Array = decks[tile_id]
+	var card_id := str(deck[index])
+	deck.remove_at(index)
+	return card_id
+
+
+func _collect_crystal_pool() -> bool:
+	if crystal_pool <= 0:
+		print("Refused: The pool is empty")
+		return false
+	var player := current_player()
+	var taken := crystal_pool
+	player["purple"] = int(player["purple"]) + taken
+	crystal_pool = 0
+	actions_left -= 1
+	_public("%s collected %d purple at Crystal mount" % [player["name"], taken])
+	state_changed.emit()
+	return true
+
+
+func _check_win() -> void:
+	if game_over:
+		return
+	for player in players:
+		var who: Dictionary = player
+		if alien_count(who) >= ALIENS_TO_WIN:
+			game_over = true
+			winner_index = int(who["index"])
+			_public("%s wins" % str(who["name"]))
+			game_won.emit(winner_index)
+			return
+
+
 func _reachable(start: String, allowed: Array, steps: int) -> Array[String]:
 	var destinations: Array[String] = []
 	var frontier: Array[String] = [start]
@@ -1166,6 +1331,10 @@ func _take_from_hand(player: Dictionary, hand_index: int) -> String:
 
 func _add_to_hand(player: Dictionary, card_id: String) -> void:
 	player["hand"].append(card_id)
+	if card_id == "skrim":
+		_public("%s has Skrim" % str(player["name"]))
+		skrim_announced.emit(str(player["name"]))
+	_check_win()
 
 
 func _path_allowed(path, allowed: Array) -> bool:

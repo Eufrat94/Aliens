@@ -52,9 +52,10 @@ func setup(card_id: String, index: int, playable: bool, faded: bool, selected: b
 	_name_label.text = card["name"]
 	_name_label.offset_right = 82.0 if is_new else 126.0
 	_body_label.text = card["text"]
-	var soon: bool = bool(card.get("soon", false))
+	var alien := int(card["kind"]) == CardData.Kind.ALIEN
+	var soon: bool = alien or bool(card.get("soon", false))
 	_soon_label.visible = soon
-	_soon_label.text = CardData.SOON_TEXT
+	_soon_label.text = CardData.ALIEN_SOON_TEXT if alien else CardData.SOON_TEXT
 	_body_label.offset_bottom = 128.0 if soon else 174.0
 	_new_badge.visible = is_new
 	_apply_kind(card)
@@ -119,10 +120,14 @@ static func strip_for(card: Dictionary) -> Dictionary:
 			"title": "RESOURCE",
 			"title_color": Color(0.12, 0.09, 0.02),
 		}
+	if kind == CardData.Kind.ALIEN:
+		return {"color": Color8(142, 68, 173), "title": "ALIEN", "title_color": Color.WHITE}
 	return {"color": Color.GRAY, "title": "", "title_color": Color.WHITE}
 
 
 static func action_tag(card: Dictionary) -> String:
+	if int(card["kind"]) == CardData.Kind.ALIEN:
+		return CardData.alien_mode_label(card)
 	if int(card["kind"]) == CardData.Kind.RESOURCE:
 		return ""
 	if not card.has("action"):

@@ -10,10 +10,25 @@ var _style: StyleBoxFlat
 @onready var _type_label: Label = $TypeLabel
 @onready var _deck_label: Label = $DeckLabel
 
+var _pool_label: Label
+
 
 func _ready() -> void:
 	_style = (get_theme_stylebox("panel") as StyleBoxFlat).duplicate()
 	add_theme_stylebox_override("panel", _style)
+	_pool_label = Label.new()
+	_pool_label.visible = false
+	_pool_label.mouse_filter = MOUSE_FILTER_IGNORE
+	_pool_label.position = Vector2(12, 86)
+	_pool_label.size = Vector2(236, 44)
+	_pool_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_pool_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_pool_label.add_theme_font_size_override("font_size", 28)
+	_pool_label.add_theme_color_override("font_color", Color8(142, 68, 173))
+	var bold := SystemFont.new()
+	bold.font_weight = 700
+	_pool_label.add_theme_font_override("font", bold)
+	add_child(_pool_label)
 
 
 func setup(id: String) -> void:
@@ -32,6 +47,16 @@ func set_deck_count(count: int) -> void:
 		_deck_label.text = "Deck: empty"
 	else:
 		_deck_label.text = "Deck: %d" % count
+
+
+func set_crystal_pool(amount: int) -> void:
+	if _pool_label == null:
+		return
+	if tile_id != "crystal_mount":
+		_pool_label.visible = false
+		return
+	_pool_label.visible = true
+	_pool_label.text = "Pool: %d" % amount
 
 
 func set_move_target(on: bool) -> void:

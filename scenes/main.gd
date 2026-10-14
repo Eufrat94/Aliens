@@ -14,8 +14,20 @@ var _selecting_move := false
 @onready var _market: Control = $PopupLayer/MarketPanel
 @onready var _preview: Control = $PreviewLayer/CardPreview
 
+var _checklist: AlienChecklist
+var _skrim: SkrimBanner
+var _win: WinScreen
+
 
 func _ready() -> void:
+	_checklist = AlienChecklist.new()
+	$PopupLayer.add_child(_checklist)
+	_checklist.alien_toggled.connect(_on_checklist_toggled)
+	_skrim = SkrimBanner.new()
+	$BannerLayer.add_child(_skrim)
+	_win = WinScreen.new()
+	$WinLayer.add_child(_win)
+	_win.new_game_pressed.connect(_on_new_game)
 	_fit_board()
 	if DisplayServer.get_name() != "headless":
 		var mode := DisplayServer.window_get_mode()
@@ -39,6 +51,7 @@ func _ready() -> void:
 	_seats.interact_pressed.connect(_on_interact)
 	_seats.fight_pressed.connect(_on_fight)
 	_seats.end_turn_pressed.connect(_on_end_turn)
+	_seats.checklist_pressed.connect(_on_checklist)
 	_board.tile_clicked.connect(_on_tile_clicked)
 	_pass.dismissed.connect(_on_pass_dismissed)
 	_popup.card_picked.connect(_on_popup_card)
@@ -51,6 +64,8 @@ func _ready() -> void:
 	game.prompt_opened.connect(_on_prompt_opened)
 	game.prompt_closed.connect(_on_prompt_closed)
 	game.turn_ended.connect(_on_turn_ended)
+	game.skrim_announced.connect(_on_skrim)
+	game.game_won.connect(_on_game_won)
 
 
 func _input(event: InputEvent) -> void:
@@ -68,6 +83,10 @@ func _input(event: InputEvent) -> void:
 			game.dismiss_prompt()
 			get_viewport().set_input_as_handled()
 		return
+	if _checklist.visible and _is_cancel(event):
+		_checklist.hide_checklist()
+		get_viewport().set_input_as_handled()
+		return
 	if _pass.visible or _setup.visible:
 		return
 	if not _is_cancel(event):
@@ -82,6 +101,8 @@ func _on_player_count_chosen(count: int) -> void:
 	_setup.visible = false
 	_board.visible = true
 	_hud.visible = true
+	if game.game_over:
+		return
 	_present_pass()
 
 
@@ -130,6 +151,13 @@ func _on_card_clicked(hand_index: int) -> void:
 	if kind == CardData.Kind.RESOURCE:
 		_selected_hand_index = -1
 		_refresh_view()
+		return
+	if kind == CardData.Kind.ALIEN:
+		_selected_hand_index = -1
+		if game.can_play_card(hand_index):
+			game.play_alien(hand_index)
+		else:
+			_refresh_view()
 		return
 	if not game.can_play_card(hand_index):
 		_selected_hand_index = -1
@@ -209,7 +237,7 @@ func _on_search() -> void:
 
 func _on_interact() -> void:
 	_clear_selection(false)
-	if game.do_interact():
+	if game.do_interact() and not game.market_visit.is_empty():
 		_hide_preview()
 		_market.present(game)
 
@@ -289,8 +317,49 @@ func _present_pass() -> void:
 	_preview.call("suppress")
 	if _popup.visible:
 		_popup.dismiss()
+	if _checklist.visible:
+		_checklist.hide_checklist()
 	_seats.conceal()
 	_pass.show_for(game.current_player())
+
+
+func _on_checklist() -> void:
+	if game.players.is_empty() or game.game_over or _pass.visible:
+		return
+	_checklist.show_for(game.current_player())
+
+
+func _on_checklist_toggled(alien_id: String, on: bool) -> void:
+	game.set_checklist(alien_id, on)
+
+
+func _on_skrim(player_name: String) -> void:
+	_skrim.show_for(player_name)
+
+
+func _on_game_won(player_index: int) -> void:
+	if _checklist.visible:
+		_checklist.hide_checklist()
+	var player: Dictionary = game.players[player_index]
+	var missing := str(CardData.get_card(game.missing_alien)["name"])
+	_win.show_winner(player, missing)
+
+
+func _on_new_game() -> void:
+	_win.visible = false
+	_skrim.visible = false
+	if _checklist.visible:
+		_checklist.hide_checklist()
+	if _popup.visible:
+		_popup.dismiss()
+	if _market.visible:
+		_market.dismiss()
+	_pass.visible = false
+	_preview.call("unsuppress")
+	_seats.conceal()
+	_board.visible = false
+	_hud.visible = false
+	_setup.visible = true
 
 
 func _hide_preview() -> void:

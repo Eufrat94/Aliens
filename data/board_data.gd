@@ -95,7 +95,7 @@ static func get_neighbors(id: String) -> Array:
 
 
 static func has_interaction(tile_id: String) -> bool:
-	return tile_id == "village_market"
+	return tile_id == "village_market" or tile_id == "crystal_mount"
 
 
 static func path_type_name(path: PathType) -> String:

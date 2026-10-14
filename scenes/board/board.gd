@@ -44,6 +44,7 @@ func refresh_decks(game: GameState) -> void:
 	for id in _tile_nodes:
 		var tile_id: String = id
 		_tile_nodes[tile_id].set_deck_count(game.deck_count(tile_id))
+		_tile_nodes[tile_id].set_crystal_pool(game.crystal_pool)
 
 
 func set_highlighted_tiles(tile_ids: Array) -> void:

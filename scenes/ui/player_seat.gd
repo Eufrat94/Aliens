@@ -8,6 +8,7 @@ signal search_pressed
 signal interact_pressed
 signal fight_pressed
 signal end_turn_pressed
+signal checklist_pressed
 
 const MINI_SCENE := preload("res://scenes/ui/mini_card.tscn")
 const CARD_SCENE := preload("res://scenes/ui/card_view.tscn")
@@ -40,10 +41,12 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 	var gap := 14.0
 	var action_w := 168.0
 	var gear_w := UiConfig.MINI_SIZE.x * float(GameState.GEAR_SLOTS) + 12.0
+	var alien_w := 210.0
 	var inner_w := size.x - inset * 2.0
-	var hand_w := inner_w - action_w - gear_w - gap * 2.0
+	var hand_w := inner_w - action_w - gear_w - alien_w - gap * 3.0
 	var hand_x := inset + action_w + gap
 	var gear_x := hand_x + hand_w + gap
+	var alien_x := gear_x + gear_w + gap
 
 	var actions := _build_actions(game, row_h)
 	actions.position = Vector2(inset, row_top)
@@ -88,6 +91,29 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 		else:
 			gear_host.add_child(UiConfig.empty_slot())
 	UiConfig.layout_fan(gear_host, gear_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
+
+	var aliens: Array = player["aliens"]
+	var alien_box := Control.new()
+	alien_box.mouse_filter = MOUSE_FILTER_IGNORE
+	alien_box.position = Vector2(alien_x, row_top)
+	alien_box.size = Vector2(alien_w, row_h)
+	add_child(alien_box)
+	var alien_title := Label.new()
+	alien_title.text = "Aliens (%d)" % aliens.size()
+	alien_title.mouse_filter = MOUSE_FILTER_IGNORE
+	alien_title.position = Vector2(0, 0)
+	alien_title.size = Vector2(alien_w, 22)
+	alien_title.add_theme_color_override("font_color", Color(0.82, 0.82, 0.9))
+	alien_title.add_theme_font_size_override("font_size", 14)
+	alien_box.add_child(alien_title)
+	var alien_host := Control.new()
+	alien_host.mouse_filter = MOUSE_FILTER_IGNORE
+	alien_box.add_child(alien_host)
+	for alien_id in aliens:
+		var alien_card: Control = MINI_SCENE.instantiate()
+		alien_host.add_child(alien_card)
+		alien_card.call("setup", str(alien_id))
+	UiConfig.layout_fan(alien_host, alien_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
 
 
 func set_instruction(text: String) -> void:
@@ -140,6 +166,8 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 
 	row.add_child(UiConfig.circle_token(UiConfig.GOLD, int(player["gold"]), Color(0.12, 0.09, 0.02)))
 	row.add_child(UiConfig.circle_token(UiConfig.PURPLE, int(player["purple"]), Color.WHITE))
+	if _has_skrim(player):
+		row.add_child(_skrim_badge())
 
 	_instruction = Label.new()
 	_instruction.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -150,6 +178,12 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 	_instruction.add_theme_font_size_override("font_size", 15)
 	_instruction.text = _instruction_text(player, game, selected_hand_index, gear_replace_index, selecting_move)
 	row.add_child(_instruction)
+
+	var aliens_button := Button.new()
+	aliens_button.text = "Aliens"
+	aliens_button.custom_minimum_size = Vector2(90, 32)
+	aliens_button.pressed.connect(func() -> void: checklist_pressed.emit())
+	row.add_child(aliens_button)
 
 	var end_turn := Button.new()
 	end_turn.text = "End turn"
@@ -275,6 +309,26 @@ func _on_gear_input(event: InputEvent, slot: int) -> void:
 		if mouse.pressed and mouse.button_index == MOUSE_BUTTON_LEFT:
 			gear_slot_clicked.emit(slot)
 			get_viewport().set_input_as_handled()
+
+
+func _has_skrim(player: Dictionary) -> bool:
+	var hand: Array = player["hand"]
+	for card_id in hand:
+		if str(card_id) == "skrim":
+			return true
+	return false
+
+
+func _skrim_badge() -> Label:
+	var label := Label.new()
+	label.text = "SKRIM"
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color8(210, 160, 255))
+	var bold := SystemFont.new()
+	bold.font_weight = 700
+	label.add_theme_font_override("font", bold)
+	return label
 
 
 func _found_names(card_ids: Array) -> String:

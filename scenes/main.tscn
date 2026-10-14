@@ -40,6 +40,9 @@ layer = 20
 
 [node name="CardPreview" parent="PreviewLayer" instance=ExtResource("9_preview")]
 
+[node name="BannerLayer" type="CanvasLayer" parent="."]
+layer = 25
+
 [node name="OverlayLayer" type="CanvasLayer" parent="."]
 layer = 30
 
@@ -47,3 +50,6 @@ layer = 30
 
 [node name="PassScreen" parent="OverlayLayer" instance=ExtResource("5_pass")]
 visible = false
+
+[node name="WinLayer" type="CanvasLayer" parent="."]
+layer = 40

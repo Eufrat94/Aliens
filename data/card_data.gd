@@ -1,10 +1,12 @@
 class_name CardData
 extends RefCounted
 
-enum Kind { GEAR, ABILITY, RESOURCE }
+enum Kind { GEAR, ABILITY, RESOURCE, ALIEN }
 enum ActionType { NONE, MOVE, SEARCH, INTERACT, FIGHT }
 
 const SOON_TEXT := "Effect coming soon."
+const ALIEN_SOON_TEXT := "Ability coming soon."
+const ALIEN_ACTIVE_NOTE := "Active: 1 action, once per turn. Other players on your tile gain 1 purple."
 
 const CARDS := {
 	"obsidian_machete": {
@@ -155,6 +157,134 @@ const CARDS := {
 		"text": "Resource. Sell at a market.",
 		"sell_value": 1,
 	},
+	"wingo": {
+		"id": "wingo",
+		"name": "Wingo",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Pay 1 purple: move to any tile.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"magnet": {
+		"id": "magnet",
+		"name": "Magnet",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Each other player on your tile gives you 1 card of their choice from their hand.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"disko": {
+		"id": "disko",
+		"name": "Disko",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Take the top card of the discard pile into your hand.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"mani": {
+		"id": "mani",
+		"name": "Mani",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Pay 1 purple: gain 5 gold.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"ugg": {
+		"id": "ugg",
+		"name": "Ugg",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Pay 3 purple: discard any alien on the table.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"wush": {
+		"id": "wush",
+		"name": "Wush",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Move another player to a tile directly next to theirs (up, down, left or right).\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"shadow": {
+		"id": "shadow",
+		"name": "Shadow",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Every other player gives you 1 gold. If you have 9 or more gold, discard Shadow.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"stopots": {
+		"id": "stopots",
+		"name": "Stopots",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "passive",
+		"text": "Other players on your tile can't use alien abilities.",
+	},
+	"pucky": {
+		"id": "pucky",
+		"name": "Pucky",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Take a random card from any player's hand, then discard 1 card from your hand.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"muddk": {
+		"id": "muddk",
+		"name": "Muddk",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "passive",
+		"text": "Players leaving your tile must pay you 1 gold, if they have any. Being pushed doesn't count.",
+	},
+	"nerfoil": {
+		"id": "nerfoil",
+		"name": "Nerfoil",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "passive",
+		"text": "Other players have a hand limit of 7. If they would gain a card at 7, they first discard 1.",
+	},
+	"skrim": {
+		"id": "skrim",
+		"name": "Skrim",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "unplayable",
+		"text": "Can't be played. Whenever anyone gains this card, everyone is told.",
+	},
+	"pikupiku": {
+		"id": "pikupiku",
+		"name": "Pikupiku",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Pay 1 purple: look at the hand of a player on your tile.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"quizazz": {
+		"id": "quizazz",
+		"name": "Quizazz",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Pick a player. They reveal to everyone whether they have an alien in hand. Yes: you gain 1 purple. No: you gain 1 gold.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"mimix": {
+		"id": "mimix",
+		"name": "Mimix",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Discard a card from your hand: use the active ability of any alien on the table, paying its costs.\n" + ALIEN_ACTIVE_NOTE,
+	},
+	"gloop": {
+		"id": "gloop",
+		"name": "Gloop",
+		"kind": Kind.ALIEN,
+		"action": ActionType.NONE,
+		"alien_mode": "active",
+		"text": "Give 1 purple to another player, then swap positions with them.\n" + ALIEN_ACTIVE_NOTE,
+	},
 }
 
 const RESOURCE_IDS: Array[String] = ["scrap_metal", "relic_shard", "river_pearl", "copper_wire"]
@@ -198,8 +328,29 @@ static func item_ids() -> Array[String]:
 	return market_pool()
 
 
-static func is_alien(_card_id: String) -> bool:
-	return false
+static func is_alien(card_id: String) -> bool:
+	if not CARDS.has(card_id):
+		return false
+	return int(CARDS[card_id]["kind"]) == Kind.ALIEN
+
+
+static func all_alien_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for card_id in CARDS:
+		if int(CARDS[card_id]["kind"]) == Kind.ALIEN:
+			ids.append(str(card_id))
+	return ids
+
+
+static func alien_mode_label(card: Dictionary) -> String:
+	match str(card.get("alien_mode", "")):
+		"active":
+			return "Active"
+		"passive":
+			return "Passive"
+		"unplayable":
+			return "Can't be played"
+	return ""
 
 
 static func is_resource(card_id: String) -> bool:

@@ -59,7 +59,10 @@ func _show_pending() -> void:
 	_strip.color = strip["color"]
 	_strip_label.text = str(strip["title"])
 	_strip_label.add_theme_color_override("font_color", strip["title_color"])
-	_body_label.text = str(card["text"])
+	var body := str(card["text"])
+	if int(card["kind"]) == CardData.Kind.ALIEN:
+		body += "\n\n" + CardData.ALIEN_SOON_TEXT
+	_body_label.text = body
 	var tag := CardView.action_tag(card)
 	_tag_label.visible = tag != ""
 	_tag_label.text = tag

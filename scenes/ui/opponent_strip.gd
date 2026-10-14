@@ -38,9 +38,10 @@ func _build_row(player: Dictionary) -> void:
 	var row_top := 34.0
 	var row_h := size.y - row_top - 4.0
 	var inner_w := size.x - inset * 2.0
-	var count_w := 78.0
-	var gear_w := GEAR_SIZE.x * float(GameState.GEAR_SLOTS) + 12.0
-	var backs_w := inner_w - gear_w - count_w - 16.0
+	var count_w := 70.0
+	var gear_w := GEAR_SIZE.x * float(GameState.GEAR_SLOTS) + 8.0
+	var alien_w := 150.0
+	var backs_w := inner_w - gear_w - alien_w - count_w - 24.0
 	var x := inset
 
 	var backs := _fan_host()
@@ -55,11 +56,18 @@ func _build_row(player: Dictionary) -> void:
 	count.size = Vector2(count_w, row_h)
 	add_child(count)
 
+	var gear_x := x + count_w + 8.0
 	var gear := _fan_host()
-	gear.position = Vector2(inset + inner_w - gear_w, row_top)
+	gear.position = Vector2(gear_x, row_top)
 	add_child(gear)
 	_fill_gear(gear, player["gear"])
 	UiConfig.layout_fan(gear, gear_w, GEAR_SIZE, row_h - GEAR_SIZE.y)
+
+	var aliens := _fan_host()
+	aliens.position = Vector2(gear_x + gear_w + 8.0, row_top)
+	add_child(aliens)
+	_fill_aliens(aliens, player["aliens"])
+	UiConfig.layout_fan(aliens, alien_w, GEAR_SIZE, row_h - GEAR_SIZE.y)
 
 
 func _build_column(player: Dictionary) -> void:
@@ -114,6 +122,18 @@ func _build_column(player: Dictionary) -> void:
 	add_child(gear)
 	_fill_gear(gear, player["gear"])
 	UiConfig.layout_fan(gear, width, GEAR_SIZE, UiConfig.HOVER_LIFT)
+	y += UiConfig.HOVER_LIFT + GEAR_SIZE.y + 8.0
+
+	var alien_title := _small_label("Aliens (%d)" % player["aliens"].size())
+	alien_title.position = Vector2(inset, y)
+	alien_title.size = Vector2(width, 20)
+	add_child(alien_title)
+	y += 20.0
+	var aliens := _fan_host()
+	aliens.position = Vector2(inset, y)
+	add_child(aliens)
+	_fill_aliens(aliens, player["aliens"])
+	UiConfig.layout_fan(aliens, width, GEAR_SIZE, UiConfig.HOVER_LIFT)
 
 
 func _header(player: Dictionary) -> HBoxContainer:
@@ -123,6 +143,10 @@ func _header(player: Dictionary) -> HBoxContainer:
 	row.add_child(_name_label(str(player["name"]), player["color"], 18))
 	row.add_child(UiConfig.circle_token(UiConfig.GOLD, int(player["gold"]), Color(0.12, 0.09, 0.02)))
 	row.add_child(UiConfig.circle_token(UiConfig.PURPLE, int(player["purple"]), Color.WHITE))
+	if _has_skrim(player):
+		var badge := _small_label("SKRIM")
+		badge.add_theme_color_override("font_color", Color8(210, 160, 255))
+		row.add_child(badge)
 	var location := _location_label(player)
 	location.size_flags_horizontal = SIZE_EXPAND_FILL
 	row.add_child(location)
@@ -130,6 +154,9 @@ func _header(player: Dictionary) -> HBoxContainer:
 	gear.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	gear.size_flags_horizontal = SIZE_SHRINK_END
 	row.add_child(gear)
+	var aliens := _small_label("Aliens (%d)" % player["aliens"].size())
+	aliens.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(aliens)
 	return row
 
 
@@ -181,6 +208,22 @@ func _fan_host() -> Control:
 func _fill_backs(host: Control, hand: Array) -> void:
 	for _card in hand:
 		host.add_child(UiConfig.card_back())
+
+
+func _has_skrim(player: Dictionary) -> bool:
+	var hand: Array = player["hand"]
+	for card_id in hand:
+		if str(card_id) == "skrim":
+			return true
+	return false
+
+
+func _fill_aliens(host: Control, aliens: Array) -> void:
+	for alien_id in aliens:
+		var mini: Control = MINI_SCENE.instantiate()
+		host.add_child(mini)
+		mini.call("setup", str(alien_id))
+		mini.call("apply_size", GEAR_SIZE)
 
 
 func _fill_gear(host: Control, gear: Array) -> void:

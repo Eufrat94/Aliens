@@ -8,6 +8,7 @@ signal search_pressed
 signal interact_pressed
 signal fight_pressed
 signal end_turn_pressed
+signal checklist_pressed
 
 const SEAT_SCENE := preload("res://scenes/ui/player_seat.tscn")
 const STRIP_SCENE := preload("res://scenes/ui/opponent_strip.tscn")
@@ -71,6 +72,7 @@ func _add_bottom(player: Dictionary, game: GameState, selected_hand_index: int, 
 	seat.connect("interact_pressed", _emit_interact)
 	seat.connect("fight_pressed", _emit_fight)
 	seat.connect("end_turn_pressed", _emit_end)
+	seat.connect("checklist_pressed", _emit_checklist)
 
 
 func _add_opponent(player: Dictionary, slot: String) -> void:
@@ -138,6 +140,10 @@ func _emit_fight() -> void:
 
 func _emit_end() -> void:
 	end_turn_pressed.emit()
+
+
+func _emit_checklist() -> void:
+	checklist_pressed.emit()
 
 
 func _clear_seats() -> void:
