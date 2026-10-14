@@ -1,0 +1,117 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/market_panel.gd" id="1_market"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_market"]
+bg_color = Color(0.117647, 0.117647, 0.164706, 0.95)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
+content_margin_left = 8.0
+content_margin_top = 8.0
+content_margin_right = 8.0
+content_margin_bottom = 8.0
+
+[node name="MarketPanel" type="Control"]
+visible = false
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1600.0
+offset_bottom = 900.0
+mouse_filter = 0
+script = ExtResource("1_market")
+
+[node name="Blocker" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0, 0, 0, 0.35)
+
+[node name="Panel" type="Panel" parent="."]
+layout_mode = 0
+offset_left = 160.0
+offset_top = 28.0
+offset_right = 1440.0
+offset_bottom = 872.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_market")
+
+[node name="Margin" type="MarginContainer" parent="Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 20
+
+[node name="Column" type="VBoxContainer" parent="Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Panel/Margin/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 28
+text = "Village market"
+horizontal_alignment = 1
+
+[node name="Gold" type="Label" parent="Panel/Margin/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.86, 0.45, 1)
+theme_override_font_sizes/font_size = 22
+text = "Gold: 5"
+horizontal_alignment = 1
+
+[node name="BuyRow" type="HBoxContainer" parent="Panel/Margin/Column"]
+layout_mode = 2
+theme_override_constants/separation = 24
+alignment = 1
+
+[node name="SellHost" type="Control" parent="Panel/Margin/Column"]
+custom_minimum_size = Vector2(0, 248)
+layout_mode = 2
+
+[node name="SellScroll" type="ScrollContainer" parent="Panel/Margin/Column/SellHost"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+horizontal_scroll_mode = 1
+vertical_scroll_mode = 0
+
+[node name="SellRow" type="HBoxContainer" parent="Panel/Margin/Column/SellHost/SellScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="EmptySell" type="Label" parent="Panel/Margin/Column/SellHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 1, 1, 0.55)
+theme_override_font_sizes/font_size = 18
+text = "No resources to sell."
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Done" type="Button" parent="Panel/Margin/Column"]
+custom_minimum_size = Vector2(280, 48)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 18
+text = "Leave"

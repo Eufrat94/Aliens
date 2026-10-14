@@ -222,5 +222,9 @@ static func item_ids() -> Array[String]:
 	return ids
 
 
+static func market_pool() -> Array[String]:
+	return item_ids()
+
+
 static func is_alien(_card_id: String) -> bool:
 	return false

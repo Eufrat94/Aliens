@@ -8,7 +8,11 @@ signal prompt_closed
 const ACTIONS_PER_TURN := 3
 const GEAR_SLOTS := 3
 const DEBUG_SHOW_SECRETS := true
-const DEBUG_GIVE_ALL_ITEMS := true
+const DEBUG_GIVE_ALL_ITEMS := false
+const STARTING_GOLD := 5
+const MARKET_OFFER_SIZE := 3
+const MARKET_BUY_PRICE := 2
+const MARKET_SELL_PRICE := 3
 const START_TILE := "village_market"
 const PLAYER_COLORS: Array[Color] = [
 	Color8(231, 76, 60),
@@ -33,6 +37,7 @@ var decks: Dictionary = {}
 var found_card_ids: Array[String] = []
 var public_log: Array[String] = []
 var prompt: Dictionary = {}
+var market_visit: Dictionary = {}
 
 
 func start_game(player_count: int) -> void:
@@ -61,7 +66,8 @@ func start_game(player_count: int) -> void:
 			"played": played,
 			"played_fresh": played_fresh,
 			"gear": gear,
-			"gold": 0,
+			"gold": STARTING_GOLD,
+			"market_offer": [],
 			"purple": 0,
 			"lure_used": false,
 		})
@@ -70,11 +76,14 @@ func start_game(player_count: int) -> void:
 		var deck: Array[String] = DeckData.build_deck(tile_id)
 		deck.shuffle()
 		decks[tile_id] = deck
+	for player in players:
+		refresh_market_offer(player)
 	current_index = 0
 	actions_left = ACTIONS_PER_TURN
 	found_card_ids.clear()
 	public_log.clear()
 	prompt = {}
+	market_visit = {}
 	state_changed.emit()
 
 
@@ -99,6 +108,8 @@ func can_play_card(hand_index: int) -> bool:
 		return false
 	if int(card["action"]) == CardData.ActionType.SEARCH:
 		return _search_block_reason_for(card) == ""
+	if int(card["action"]) == CardData.ActionType.INTERACT:
+		return BoardData.has_interaction(str(current_player()["tile"]))
 	return true
 
 
@@ -117,6 +128,9 @@ func play_reason(hand_index: int) -> String:
 		return ""
 	if kind == CardData.Kind.ACTION and int(card["action"]) == CardData.ActionType.SEARCH:
 		return _search_block_reason_for(card)
+	if kind == CardData.Kind.ACTION and int(card["action"]) == CardData.ActionType.INTERACT:
+		if not BoardData.has_interaction(str(current_player()["tile"])):
+			return "Nothing to interact with here"
 	return ""
 
 
@@ -183,6 +197,8 @@ func play_move_card(hand_index: int, destination: String) -> bool:
 		_tile_name(destination),
 		card["name"],
 	])
+	if destination == START_TILE and from_tile != START_TILE:
+		refresh_market_offer(player)
 	_maybe_map(player, destination)
 	state_changed.emit()
 	return true
@@ -312,7 +328,9 @@ func play_placeholder_card(hand_index: int) -> bool:
 	if action == CardData.ActionType.SEARCH:
 		print("Refused: that card cannot be played")
 		return false
-	if action != CardData.ActionType.INTERACT and action != CardData.ActionType.FIGHT:
+	if action == CardData.ActionType.INTERACT:
+		return begin_market(hand_index)
+	if action != CardData.ActionType.FIGHT:
 		print("Refused: that card cannot be played")
 		return false
 	_pay(player, hand_index)
@@ -331,7 +349,7 @@ func can_equip(hand_index: int) -> bool:
 
 
 func equip_gear(hand_index: int, replace_slot: int = -1) -> bool:
-	if not prompt.is_empty():
+	if _is_busy():
 		print("Refused: finish the current choice first")
 		return false
 	if not _hand_has(hand_index):
@@ -379,7 +397,7 @@ func can_rest() -> bool:
 
 
 func rest() -> bool:
-	if not prompt.is_empty():
+	if _is_busy():
 		print("Refused: finish the current choice first")
 		return false
 	if actions_left <= 0:
@@ -410,7 +428,7 @@ func end_turn() -> void:
 	if players.is_empty():
 		print("Refused: game has not started")
 		return
-	if not prompt.is_empty():
+	if _is_busy():
 		print("Refused: finish the current choice first")
 		return
 	var player := current_player()
@@ -737,8 +755,128 @@ func _deck_here_reason() -> String:
 	return ""
 
 
+func refresh_market_offer(player: Dictionary) -> void:
+	var pool := CardData.market_pool()
+	var offer: Array[String] = []
+	for _slot in MARKET_OFFER_SIZE:
+		offer.append(pool[randi() % pool.size()])
+	player["market_offer"] = offer
+	_secret("%s market offer: %s" % [str(player["name"]), _name_list(offer)])
+
+
+func begin_market(hand_index: int) -> bool:
+	if _refuse_unplayable(hand_index):
+		return false
+	var card := _card_at(hand_index)
+	if int(card["kind"]) != CardData.Kind.ACTION or int(card["action"]) != CardData.ActionType.INTERACT:
+		print("Refused: that card cannot interact")
+		return false
+	var bought: Array[String] = []
+	market_visit = {
+		"hand_index": hand_index,
+		"card_id": str(card["id"]),
+		"sold": 0,
+		"bought": bought,
+	}
+	return true
+
+
+func market_sell(resource_hand_index: int) -> bool:
+	if market_visit.is_empty():
+		print("Refused: the market is not open")
+		return false
+	var player := current_player()
+	var hand: Array = player["hand"]
+	if resource_hand_index < 0 or resource_hand_index >= hand.size():
+		print("Refused: no card there")
+		return false
+	var card_id := str(hand[resource_hand_index])
+	var card := CardData.get_card(card_id)
+	if int(card["kind"]) != CardData.Kind.RESOURCE:
+		print("Refused: only resources can be sold")
+		return false
+	_take_from_hand(player, resource_hand_index)
+	player["gold"] = int(player["gold"]) + MARKET_SELL_PRICE
+	market_visit["sold"] = int(market_visit["sold"]) + 1
+	if resource_hand_index < int(market_visit["hand_index"]):
+		market_visit["hand_index"] = int(market_visit["hand_index"]) - 1
+	state_changed.emit()
+	return true
+
+
+func market_buy(offer_slot: int) -> bool:
+	if market_visit.is_empty():
+		print("Refused: the market is not open")
+		return false
+	var player := current_player()
+	var offer: Array = player["market_offer"]
+	if offer_slot < 0 or offer_slot >= offer.size():
+		print("Refused: no card there")
+		return false
+	var card_id := str(offer[offer_slot])
+	if card_id == "":
+		print("Refused: that card was already sold")
+		return false
+	if int(player["gold"]) < MARKET_BUY_PRICE:
+		print("Refused: not enough gold")
+		return false
+	offer[offer_slot] = ""
+	player["gold"] = int(player["gold"]) - MARKET_BUY_PRICE
+	_add_to_hand(player, card_id, false)
+	var bought: Array = market_visit["bought"]
+	bought.append(card_id)
+	state_changed.emit()
+	return true
+
+
+func market_has_traded() -> bool:
+	if market_visit.is_empty():
+		return false
+	var bought: Array = market_visit["bought"]
+	return int(market_visit["sold"]) > 0 or not bought.is_empty()
+
+
+func market_finish() -> bool:
+	if market_visit.is_empty():
+		return false
+	var player := current_player()
+	var sold_count := int(market_visit["sold"])
+	var bought: Array = market_visit["bought"]
+	var traded := sold_count > 0 or not bought.is_empty()
+	if traded:
+		var hand_index := int(market_visit["hand_index"])
+		var card_id := str(market_visit["card_id"])
+		var hand: Array = player["hand"]
+		if hand_index < 0 or hand_index >= hand.size() or str(hand[hand_index]) != card_id:
+			var found: int = int(hand.find(card_id))
+			hand_index = found
+		if hand_index >= 0:
+			_pay(player, hand_index)
+		_public(_market_log(player, sold_count, bought))
+	market_visit = {}
+	state_changed.emit()
+	return traded
+
+
+func _market_log(player: Dictionary, sold_count: int, bought: Array) -> String:
+	var parts: PackedStringArray = PackedStringArray()
+	if sold_count > 0:
+		var noun := "resource" if sold_count == 1 else "resources"
+		parts.append("sold %d %s (+%d)" % [sold_count, noun, sold_count * MARKET_SELL_PRICE])
+	if not bought.is_empty():
+		var names: PackedStringArray = PackedStringArray()
+		for card_id in bought:
+			names.append(str(CardData.get_card(str(card_id))["name"]))
+		parts.append("bought %s (-%d)" % [", ".join(names), bought.size() * MARKET_BUY_PRICE])
+	return "%s at the market: %s" % [str(player["name"]), ", ".join(parts)]
+
+
+func _is_busy() -> bool:
+	return not prompt.is_empty() or not market_visit.is_empty()
+
+
 func _refuse_unplayable(hand_index: int) -> bool:
-	if not prompt.is_empty():
+	if _is_busy():
 		print("Refused: finish the current choice first")
 		return true
 	if not _hand_has(hand_index):

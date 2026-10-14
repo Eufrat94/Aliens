@@ -9,6 +9,7 @@ var _gear_replace_index := -1
 @onready var _setup: Control = $SetupScreen
 @onready var _pass: Control = $PassScreen
 @onready var _popup: Control = $PrivatePopup
+@onready var _market: Control = $MarketPanel
 
 
 func _ready() -> void:
@@ -30,12 +31,21 @@ func _ready() -> void:
 	_pass.dismissed.connect(_on_pass_dismissed)
 	_popup.card_picked.connect(_on_popup_card)
 	_popup.button_picked.connect(_on_popup_button)
+	_market.buy_pressed.connect(_on_market_buy)
+	_market.sell_pressed.connect(_on_market_sell)
+	_market.closed.connect(_on_market_closed)
+	_market.visible = false
 	game.state_changed.connect(_on_state_changed)
 	game.prompt_opened.connect(_on_prompt_opened)
 	game.prompt_closed.connect(_on_prompt_closed)
 
 
 func _input(event: InputEvent) -> void:
+	if _market.visible:
+		if _is_cancel(event):
+			_close_market()
+			get_viewport().set_input_as_handled()
+		return
 	if _pass.visible or _setup.visible or _popup.visible:
 		return
 	if not _is_cancel(event):
@@ -62,6 +72,8 @@ func _on_state_changed() -> void:
 	_hud.refresh(game, _selected_hand_index, _gear_replace_index)
 	_board.refresh_tokens(game)
 	_board.refresh_decks(game)
+	if _market.visible:
+		_market.refresh(game)
 
 
 func _on_card_clicked(hand_index: int) -> void:
@@ -113,12 +125,15 @@ func _on_card_clicked(hand_index: int) -> void:
 			_hud.refresh(game, _selected_hand_index, -1)
 			return
 		game.play_search_card(hand_index)
+	elif int(card["action"]) == CardData.ActionType.INTERACT:
+		if game.begin_market(hand_index):
+			_market.present(game)
 	else:
 		game.play_placeholder_card(hand_index)
 
 
 func _on_tile_clicked(tile_id: String) -> void:
-	if _popup.visible or _gear_replace_index >= 0 or _selected_hand_index < 0:
+	if _popup.visible or _market.visible or _gear_replace_index >= 0 or _selected_hand_index < 0:
 		return
 	var hand_index := _selected_hand_index
 	var card_id: String = game.current_player()["hand"][hand_index]
@@ -152,6 +167,8 @@ func _on_rest() -> void:
 
 
 func _on_end_turn() -> void:
+	if not game.market_visit.is_empty():
+		return
 	_gear_replace_index = -1
 	_clear_move_selection(false)
 	game.end_turn()
@@ -177,6 +194,23 @@ func _on_popup_card(index: int) -> void:
 
 func _on_popup_button(label: String) -> void:
 	game.choose_prompt_button(label)
+
+
+func _on_market_buy(slot: int) -> void:
+	game.market_buy(slot)
+
+
+func _on_market_sell(hand_index: int) -> void:
+	game.market_sell(hand_index)
+
+
+func _on_market_closed() -> void:
+	_close_market()
+
+
+func _close_market() -> void:
+	_market.dismiss()
+	game.market_finish()
 
 
 func _clear_move_selection(refresh_hud: bool = true) -> void:
