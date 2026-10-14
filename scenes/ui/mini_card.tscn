@@ -1,0 +1,32 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scenes/ui/mini_card.gd" id="1_mini"]
+
+[node name="MiniCard" type="Panel"]
+custom_minimum_size = Vector2(72, 100)
+offset_right = 72.0
+offset_bottom = 100.0
+script = ExtResource("1_mini")
+
+[node name="Strip" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = 68.0
+offset_bottom = 22.0
+mouse_filter = 2
+color = Color(0.545098, 0.352941, 0.168627, 1)
+
+[node name="NameLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 4.0
+offset_top = 24.0
+offset_right = 68.0
+offset_bottom = 96.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.08, 0.08, 0.1, 1)
+theme_override_font_sizes/font_size = 11
+text = "Card"
+horizontal_alignment = 1
+autowrap_mode = 3
+clip_text = true

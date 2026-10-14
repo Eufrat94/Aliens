@@ -3,20 +3,20 @@
 [ext_resource type="Script" path="res://scenes/ui/card_view.gd" id="1_card"]
 
 [node name="CardView" type="Panel"]
-custom_minimum_size = Vector2(120, 170)
-offset_right = 120.0
-offset_bottom = 170.0
+custom_minimum_size = Vector2(130, 180)
+offset_right = 130.0
+offset_bottom = 180.0
 script = ExtResource("1_card")
 
 [node name="NameLabel" type="Label" parent="."]
 layout_mode = 0
 offset_left = 4.0
 offset_top = 2.0
-offset_right = 116.0
-offset_bottom = 36.0
+offset_right = 126.0
+offset_bottom = 40.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.08, 0.08, 0.1, 1)
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 14
 text = "Card"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -25,9 +25,9 @@ autowrap_mode = 3
 [node name="ActionStrip" type="ColorRect" parent="."]
 layout_mode = 0
 offset_left = 6.0
-offset_top = 38.0
-offset_right = 114.0
-offset_bottom = 56.0
+offset_top = 42.0
+offset_right = 124.0
+offset_bottom = 62.0
 mouse_filter = 2
 color = Color(0.545098, 0.352941, 0.168627, 1)
 
@@ -48,12 +48,12 @@ vertical_alignment = 1
 [node name="BodyLabel" type="Label" parent="."]
 layout_mode = 0
 offset_left = 6.0
-offset_top = 60.0
-offset_right = 114.0
-offset_bottom = 164.0
+offset_top = 66.0
+offset_right = 124.0
+offset_bottom = 174.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.2, 0.2, 0.22, 1)
-theme_override_font_sizes/font_size = 11
+theme_override_font_sizes/font_size = 12
 text = "Card text"
 horizontal_alignment = 1
 autowrap_mode = 3
@@ -63,9 +63,9 @@ clip_text = true
 visible = false
 layout_mode = 0
 offset_left = 4.0
-offset_top = 120.0
-offset_right = 116.0
-offset_bottom = 168.0
+offset_top = 128.0
+offset_right = 126.0
+offset_bottom = 176.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.35, 0.35, 0.38, 1)
 theme_override_font_sizes/font_size = 10
@@ -77,10 +77,10 @@ clip_text = true
 [node name="NewBadge" type="ColorRect" parent="."]
 visible = false
 layout_mode = 0
-offset_left = 78.0
+offset_left = 86.0
 offset_top = 4.0
-offset_right = 116.0
-offset_bottom = 20.0
+offset_right = 126.0
+offset_bottom = 22.0
 mouse_filter = 2
 color = Color(0.75, 0.12, 0.12, 1)
 

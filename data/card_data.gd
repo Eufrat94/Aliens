@@ -27,7 +27,7 @@ const CARDS := {
 		"name": "Talk",
 		"kind": Kind.ACTION,
 		"action": ActionType.INTERACT,
-		"text": "Use one action at this location. (Not active yet)",
+		"text": "Use one action at this location (e.g. the market).",
 	},
 	"brawl": {
 		"id": "brawl",

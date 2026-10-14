@@ -4,7 +4,7 @@ signal player_count_chosen(count: int)
 
 
 func _ready() -> void:
-	for count in [2, 3, 4, 5]:
+	for count in [2, 3, 4]:
 		var button := get_node("Center/Box/Margin/Buttons/Count%d" % count) as Button
 		button.pressed.connect(_choose.bind(count))
 

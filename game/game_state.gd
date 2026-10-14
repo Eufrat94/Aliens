@@ -41,8 +41,8 @@ var market_visit: Dictionary = {}
 
 
 func start_game(player_count: int) -> void:
-	if player_count < 2 or player_count > 5:
-		print("Refused: player count must be between 2 and 5")
+	if player_count < 2 or player_count > 4:
+		print("Refused: player count must be between 2 and 4")
 		return
 	players = []
 	for i in player_count:

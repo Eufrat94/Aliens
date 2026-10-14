@@ -5,8 +5,8 @@
 [node name="PassScreen" type="Control"]
 layout_mode = 3
 anchors_preset = 0
-offset_right = 1600.0
-offset_bottom = 900.0
+offset_right = 1920.0
+offset_bottom = 1080.0
 script = ExtResource("1_pass")
 
 [node name="Backdrop" type="ColorRect" parent="."]
@@ -22,9 +22,9 @@ color = Color(0.117647, 0.117647, 0.164706, 1)
 [node name="Title" type="Label" parent="."]
 layout_mode = 0
 offset_left = 80.0
-offset_top = 330.0
-offset_right = 1520.0
-offset_bottom = 420.0
+offset_top = 420.0
+offset_right = 1840.0
+offset_bottom = 510.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.906, 0.298, 0.235, 1)
 theme_override_font_sizes/font_size = 64
@@ -34,10 +34,10 @@ vertical_alignment = 1
 
 [node name="Hint" type="Label" parent="."]
 layout_mode = 0
-offset_left = 120.0
-offset_top = 430.0
-offset_right = 1480.0
-offset_bottom = 500.0
+offset_left = 160.0
+offset_top = 520.0
+offset_right = 1760.0
+offset_bottom = 600.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.82, 0.82, 0.88, 1)
 theme_override_font_sizes/font_size = 24

@@ -16,8 +16,8 @@ content_margin_bottom = 32.0
 [node name="SetupScreen" type="Control"]
 layout_mode = 3
 anchors_preset = 0
-offset_right = 1600.0
-offset_bottom = 900.0
+offset_right = 1920.0
+offset_bottom = 1080.0
 script = ExtResource("1_setup")
 
 [node name="Background" type="ColorRect" parent="."]
@@ -83,9 +83,3 @@ custom_minimum_size = Vector2(88, 72)
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "4"
-
-[node name="Count5" type="Button" parent="Center/Box/Margin/Buttons"]
-custom_minimum_size = Vector2(88, 72)
-layout_mode = 2
-theme_override_font_sizes/font_size = 32
-text = "5"

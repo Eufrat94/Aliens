@@ -26,7 +26,7 @@ func present(data: Dictionary) -> void:
 		if clickable:
 			card_view.card_clicked.connect(_on_card)
 		else:
-			card_view.mouse_filter = MOUSE_FILTER_IGNORE
+			card_view.allow_hover_only()
 	_card_row.visible = not cards.is_empty()
 	var buttons: Array = data["buttons"]
 	for entry in buttons:

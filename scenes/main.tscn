@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scenes/main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/board/board.tscn" id="2_board"]
@@ -7,18 +7,21 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/pass_screen.tscn" id="5_pass"]
 [ext_resource type="PackedScene" path="res://scenes/ui/private_popup.tscn" id="6_popup"]
 [ext_resource type="PackedScene" path="res://scenes/ui/market_panel.tscn" id="7_market"]
+[ext_resource type="PackedScene" path="res://scenes/ui/seat_layer.tscn" id="8_seats"]
+[ext_resource type="PackedScene" path="res://scenes/ui/card_preview.tscn" id="9_preview"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
 [node name="Background" type="ColorRect" parent="."]
-offset_right = 1600.0
-offset_bottom = 900.0
+offset_right = 1920.0
+offset_bottom = 1080.0
 mouse_filter = 2
 color = Color(0.7843137, 0.7490196, 0.9058824, 1)
 
 [node name="Board" parent="." instance=ExtResource("2_board")]
-scale = Vector2(0.75, 0.75)
+
+[node name="SeatLayer" parent="." instance=ExtResource("8_seats")]
 
 [node name="Hud" parent="." instance=ExtResource("3_hud")]
 
@@ -30,3 +33,5 @@ scale = Vector2(0.75, 0.75)
 
 [node name="PassScreen" parent="." instance=ExtResource("5_pass")]
 visible = false
+
+[node name="CardPreview" parent="." instance=ExtResource("9_preview")]

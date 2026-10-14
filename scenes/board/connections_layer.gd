@@ -3,7 +3,25 @@ extends Node2D
 # The bow is half this length. 340px keeps Sacred altar–Spaceship outside Bandit camp.
 const CONTROL_OFFSET := 340.0
 const CURVE_POINTS := 24
-const LABEL_SIZE := 16
+const LABEL_SIZE := 20
+
+
+func sample_points(board) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	for connection in BoardData.CONNECTIONS:
+		var a: Vector2 = board.get_tile_center(connection["a"])
+		var b: Vector2 = board.get_tile_center(connection["b"])
+		var path: BoardData.PathType = connection["path"]
+		if path == BoardData.PathType.PLANE:
+			var board_center: Vector2 = board.get_tile_center("village_market")
+			var control := _control_point(a, b, board_center)
+			for i in CURVE_POINTS:
+				var t := float(i) / float(CURVE_POINTS - 1)
+				points.append(_bezier(a, control, b, t))
+		else:
+			points.append(a)
+			points.append(b)
+	return points
 
 
 func _draw() -> void:

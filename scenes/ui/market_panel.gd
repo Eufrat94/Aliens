@@ -55,7 +55,7 @@ func _fill_buy(player: Dictionary) -> void:
 		var card_view: CardView = CARD_SCENE.instantiate()
 		column.add_child(card_view)
 		card_view.setup(card_id, slot, true, false, false, false, "")
-		card_view.mouse_filter = MOUSE_FILTER_IGNORE
+		card_view.allow_hover_only()
 		var button := Button.new()
 		button.text = "Buy — 2 gold"
 		button.custom_minimum_size = Vector2(120, 40)
@@ -81,7 +81,7 @@ func _fill_sell(player: Dictionary) -> void:
 		var card_view: CardView = CARD_SCENE.instantiate()
 		column.add_child(card_view)
 		card_view.setup(card_id, i, true, false, false, false, "")
-		card_view.mouse_filter = MOUSE_FILTER_IGNORE
+		card_view.allow_hover_only()
 		var button := Button.new()
 		button.text = "Sell — 3 gold"
 		button.custom_minimum_size = Vector2(120, 40)

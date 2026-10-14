@@ -1,3 +1,4 @@
+class_name GameBoard
 extends Node2D
 
 signal tile_clicked(tile_id: String)
@@ -8,8 +9,8 @@ const TILE_HEIGHT := 150.0
 const H_GAP := 140.0
 const V_GAP := 110.0
 const BOARD_ORIGIN := Vector2(20, 16)
-const TOKEN_RADIUS := 18.0
-const TOKEN_GAP := 14.0
+const TOKEN_RADIUS := 24.0
+const TOKEN_GAP := 4.0
 
 var _tile_nodes := {}
 var _game: GameState
@@ -54,6 +55,29 @@ func clear_highlights() -> void:
 	set_highlighted_tiles([])
 
 
+func content_bounds() -> Rect2:
+	var min_p := Vector2(INF, INF)
+	var max_p := Vector2(-INF, -INF)
+	for id in _tile_nodes:
+		var tile: Control = _tile_nodes[id]
+		var tile_size := tile.size
+		if tile_size.x < 1.0:
+			tile_size = Vector2(TILE_WIDTH, TILE_HEIGHT)
+		var rect := Rect2(tile.position, tile_size)
+		min_p.x = minf(min_p.x, rect.position.x)
+		min_p.y = minf(min_p.y, rect.position.y)
+		max_p.x = maxf(max_p.x, rect.end.x)
+		max_p.y = maxf(max_p.y, rect.end.y)
+	var points: PackedVector2Array = $ConnectionsLayer.sample_points(self)
+	for point in points:
+		var at: Vector2 = point
+		min_p.x = minf(min_p.x, at.x)
+		min_p.y = minf(min_p.y, at.y)
+		max_p.x = maxf(max_p.x, at.x)
+		max_p.y = maxf(max_p.y, at.y)
+	return Rect2(min_p, max_p - min_p).grow(28.0)
+
+
 func get_tile_center(id: String) -> Vector2:
 	var grid: Vector2i = BoardData.get_tile(id)["grid_pos"]
 	return _tile_top_left(grid) + Vector2(TILE_WIDTH, TILE_HEIGHT) * 0.5
@@ -84,8 +108,8 @@ func _draw_token_group(canvas: CanvasItem, tile_id: String, group: Array) -> voi
 		var pos := Vector2(x, y)
 		var is_current: bool = int(player["index"]) == _game.current_index
 		if is_current:
-			canvas.draw_circle(pos, 26.0, Color.BLACK)
-			canvas.draw_circle(pos, 23.0, Color.WHITE)
+			canvas.draw_circle(pos, TOKEN_RADIUS + 10.0, Color.BLACK)
+			canvas.draw_circle(pos, TOKEN_RADIUS + 6.0, Color.WHITE)
 		canvas.draw_circle(pos, TOKEN_RADIUS, player["color"])
 		canvas.draw_arc(pos, TOKEN_RADIUS, 0.0, TAU, 40, Color.BLACK, 2.0, true)
 		_draw_player_number(canvas, pos, int(player["index"]) + 1)
@@ -96,7 +120,7 @@ func _draw_player_number(canvas: CanvasItem, pos: Vector2, number: int) -> void:
 	var font := ThemeDB.fallback_font
 	if font == null:
 		return
-	var font_size := 18
+	var font_size := 22
 	var text := str(number)
 	var text_size := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
 	var baseline := Vector2(
