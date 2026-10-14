@@ -5,6 +5,7 @@ const HOVER_DELAY := 0.3
 
 var _timer: Timer
 var _panel: Panel
+var _suppressed := false
 var _name_label: Label
 var _strip: ColorRect
 var _strip_label: Label
@@ -24,7 +25,7 @@ func _ready() -> void:
 
 
 func begin_hover(card_id: String) -> void:
-	if card_id == "":
+	if _suppressed or card_id == "":
 		return
 	set_meta("pending_card", card_id)
 	_timer.start()
@@ -33,10 +34,22 @@ func begin_hover(card_id: String) -> void:
 func end_hover() -> void:
 	set_meta("pending_card", "")
 	_timer.stop()
-	_panel.visible = false
+	if _panel != null:
+		_panel.visible = false
+
+
+func suppress() -> void:
+	_suppressed = true
+	end_hover()
+
+
+func unsuppress() -> void:
+	_suppressed = false
 
 
 func _show_pending() -> void:
+	if _suppressed:
+		return
 	var card_id := str(get_meta("pending_card", ""))
 	if card_id == "":
 		return

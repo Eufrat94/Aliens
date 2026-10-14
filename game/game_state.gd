@@ -432,6 +432,22 @@ func choose_prompt_button(label: String) -> void:
 		_close_prompt()
 
 
+func dismiss_prompt() -> void:
+	if prompt.is_empty():
+		return
+	var kind := str(prompt["kind"])
+	if kind == "lure":
+		_resolve_lure("Top")
+	elif kind == "keep_one":
+		choose_prompt_card(0)
+	elif kind == "notebook" or kind == "reorder":
+		choose_prompt_button("Done")
+	elif kind == "radio_pick":
+		_resolve_radio("Skip")
+	else:
+		_close_prompt()
+
+
 func begin_turn() -> void:
 	if players.is_empty() or not prompt.is_empty():
 		return

@@ -13,25 +13,37 @@
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="GameLayer" type="CanvasLayer" parent="."]
+layer = 0
+
+[node name="Background" type="ColorRect" parent="GameLayer"]
 offset_right = 1920.0
 offset_bottom = 1080.0
 mouse_filter = 2
 color = Color(0.7843137, 0.7490196, 0.9058824, 1)
 
-[node name="Board" parent="." instance=ExtResource("2_board")]
+[node name="Board" parent="GameLayer" instance=ExtResource("2_board")]
 
-[node name="SeatLayer" parent="." instance=ExtResource("8_seats")]
+[node name="SeatLayer" parent="GameLayer" instance=ExtResource("8_seats")]
 
-[node name="Hud" parent="." instance=ExtResource("3_hud")]
+[node name="Hud" parent="GameLayer" instance=ExtResource("3_hud")]
 
-[node name="PrivatePopup" parent="." instance=ExtResource("6_popup")]
+[node name="PopupLayer" type="CanvasLayer" parent="."]
+layer = 10
 
-[node name="MarketPanel" parent="." instance=ExtResource("7_market")]
+[node name="PrivatePopup" parent="PopupLayer" instance=ExtResource("6_popup")]
 
-[node name="SetupScreen" parent="." instance=ExtResource("4_setup")]
+[node name="MarketPanel" parent="PopupLayer" instance=ExtResource("7_market")]
 
-[node name="PassScreen" parent="." instance=ExtResource("5_pass")]
+[node name="PreviewLayer" type="CanvasLayer" parent="."]
+layer = 20
+
+[node name="CardPreview" parent="PreviewLayer" instance=ExtResource("9_preview")]
+
+[node name="OverlayLayer" type="CanvasLayer" parent="."]
+layer = 30
+
+[node name="SetupScreen" parent="OverlayLayer" instance=ExtResource("4_setup")]
+
+[node name="PassScreen" parent="OverlayLayer" instance=ExtResource("5_pass")]
 visible = false
-
-[node name="CardPreview" parent="." instance=ExtResource("9_preview")]

@@ -35,6 +35,11 @@ func refresh(game: GameState, selected_hand_index: int = -1, gear_replace_index:
 			_add_opponent(who, _slot_for(offset, count))
 
 
+func conceal() -> void:
+	_clear_seats()
+	_bottom = null
+
+
 func show_status(text: String) -> void:
 	if _bottom != null:
 		_bottom.call("set_instruction", text)

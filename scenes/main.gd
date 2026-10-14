@@ -5,13 +5,14 @@ var _selected_hand_index := -1
 var _gear_replace_index := -1
 var _selecting_move := false
 
-@onready var _board: GameBoard = $Board
-@onready var _seats: Control = $SeatLayer
-@onready var _hud: Control = $Hud
-@onready var _setup: Control = $SetupScreen
-@onready var _pass: Control = $PassScreen
-@onready var _popup: Control = $PrivatePopup
-@onready var _market: Control = $MarketPanel
+@onready var _board: GameBoard = $GameLayer/Board
+@onready var _seats: Control = $GameLayer/SeatLayer
+@onready var _hud: Control = $GameLayer/Hud
+@onready var _setup: Control = $OverlayLayer/SetupScreen
+@onready var _pass: Control = $OverlayLayer/PassScreen
+@onready var _popup: Control = $PopupLayer/PrivatePopup
+@onready var _market: Control = $PopupLayer/MarketPanel
+@onready var _preview: Control = $PreviewLayer/CardPreview
 
 
 func _ready() -> void:
@@ -62,7 +63,12 @@ func _input(event: InputEvent) -> void:
 			_close_market()
 			get_viewport().set_input_as_handled()
 		return
-	if _pass.visible or _setup.visible or _popup.visible:
+	if _popup.visible:
+		if _is_cancel(event):
+			game.dismiss_prompt()
+			get_viewport().set_input_as_handled()
+		return
+	if _pass.visible or _setup.visible:
 		return
 	if not _is_cancel(event):
 		return
@@ -76,10 +82,16 @@ func _on_player_count_chosen(count: int) -> void:
 	_setup.visible = false
 	_board.visible = true
 	_hud.visible = true
-	_pass.show_for(game.current_player())
+	_present_pass()
 
 
 func _on_state_changed() -> void:
+	if _pass.visible:
+		_hud.refresh_log(game)
+		_board.refresh_tokens(game)
+		_board.refresh_decks(game)
+		_seats.conceal()
+		return
 	_refresh_view()
 	_board.refresh_tokens(game)
 	_board.refresh_decks(game)
@@ -92,6 +104,7 @@ func _refresh_view() -> void:
 		return
 	_hud.refresh_log(game)
 	_seats.refresh(game, _selected_hand_index, _gear_replace_index, _selecting_move)
+	_warn_if_popup_missing()
 
 
 func _on_card_clicked(hand_index: int) -> void:
@@ -197,6 +210,7 @@ func _on_search() -> void:
 func _on_interact() -> void:
 	_clear_selection(false)
 	if game.do_interact():
+		_hide_preview()
 		_market.present(game)
 
 
@@ -213,19 +227,36 @@ func _on_end_turn() -> void:
 
 func _on_turn_ended() -> void:
 	if game.prompt.is_empty() and not _pass.visible:
-		_pass.show_for(game.current_player())
+		_present_pass()
 
 
 func _on_pass_dismissed() -> void:
+	_preview.call("unsuppress")
 	game.begin_turn()
+	_refresh_view()
 
 
 func _on_prompt_opened(prompt: Dictionary) -> void:
+	_hide_preview()
 	_popup.present(prompt)
 
 
 func _on_prompt_closed() -> void:
 	_popup.dismiss()
+	call_deferred("_after_prompt_closed")
+
+
+func _after_prompt_closed() -> void:
+	if not game.prompt.is_empty():
+		if not _popup.visible:
+			_popup.present(game.prompt)
+		if not _pass.visible:
+			_refresh_view()
+		return
+	if _pass.visible:
+		_seats.conceal()
+		return
+	_refresh_view()
 
 
 func _on_popup_card(index: int) -> void:
@@ -251,6 +282,51 @@ func _on_market_closed() -> void:
 func _close_market() -> void:
 	_market.dismiss()
 	game.market_finish()
+
+
+func _present_pass() -> void:
+	_hide_preview()
+	_preview.call("suppress")
+	if _popup.visible:
+		_popup.dismiss()
+	_seats.conceal()
+	_pass.show_for(game.current_player())
+
+
+func _hide_preview() -> void:
+	_preview.call("end_hover")
+
+
+func _warn_if_popup_missing() -> void:
+	if game.players.is_empty() or _pass.visible or _setup.visible:
+		return
+	var waiting := not game.prompt.is_empty() or not game.market_visit.is_empty()
+	var showing := _popup.visible or _market.visible
+	if waiting and not showing:
+		print("Warning: the game is waiting on a popup, but none is visible.")
+	if game.actions_left <= 0 or waiting or showing:
+		return
+	var move_button := _find_action_button("Move")
+	var search_button := _find_action_button("Search")
+	if move_button != null and move_button.disabled == game.can_move():
+		print("Warning: Move is out of date while actions are left.")
+	if search_button != null and search_button.disabled == game.can_search():
+		print("Warning: Search is out of date while actions are left.")
+
+
+func _find_action_button(title: String) -> Button:
+	var found: Button = _find_button(_seats, title)
+	return found
+
+
+func _find_button(node: Node, title: String) -> Button:
+	if node is Button and (node as Button).text == title:
+		return node as Button
+	for child in node.get_children():
+		var match_button := _find_button(child, title)
+		if match_button != null:
+			return match_button
+	return null
 
 
 func _clear_selection(refresh_hud: bool = true) -> void:
