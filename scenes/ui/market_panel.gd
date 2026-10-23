@@ -84,7 +84,7 @@ func _fill_sell(player: Dictionary) -> void:
 		card_view.setup(card_id, i, true, false, false, false, "")
 		card_view.allow_hover_only()
 		var button := Button.new()
-		button.text = "Sell — 3 gold"
+		button.text = "Sell — %d gold" % GameState.MARKET_SELL_PRICE
 		button.custom_minimum_size = Vector2(120, 40)
 		button.pressed.connect(_on_sell.bind(i))
 		column.add_child(button)

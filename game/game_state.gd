@@ -20,10 +20,11 @@ const DEBUG_START_PURPLE := 0
 const ALIENS_TO_WIN := 5
 const NERFOIL_HAND_LIMIT := 7
 const STARTING_GOLD := 5
+const STARTING_PURPLE := 1
 const STARTING_RESOURCES := 2
 const MARKET_OFFER_SIZE := 3
 const MARKET_BUY_PRICE := 2
-const MARKET_SELL_PRICE := 3
+const MARKET_SELL_PRICE := 1
 const START_TILE := "village_market"
 const PLAYER_COLORS: Array[Color] = [
 	Color8(231, 76, 60),
@@ -62,6 +63,7 @@ var _delivering := false
 var _after_gains := ""
 var _finish_message := ""
 var _follow: Dictionary = {}
+var _passenger: Dictionary = {}
 
 
 func start_game(player_count: int) -> void:
@@ -84,7 +86,7 @@ func start_game(player_count: int) -> void:
 			"gear_used_this_turn": [],
 			"gold": STARTING_GOLD,
 			"market_offer": [],
-			"purple": DEBUG_START_PURPLE,
+			"purple": DEBUG_START_PURPLE if DEBUG_START_PURPLE > 0 else STARTING_PURPLE,
 			"lure_used_this_turn": false,
 			"aliens": [],
 			"aliens_used_this_turn": [],
@@ -115,6 +117,7 @@ func start_game(player_count: int) -> void:
 	_after_gains = ""
 	_finish_message = ""
 	_follow = {}
+	_passenger = {}
 	_give_debug_aliens()
 	state_changed.emit()
 
@@ -530,6 +533,8 @@ func choose_prompt_button(label: String) -> void:
 			cancel_alien_choice()
 		else:
 			_choose_alien_button(label)
+	elif kind == "passenger_choice":
+		_choose_passenger(label)
 	else:
 		_close_prompt()
 
@@ -550,6 +555,8 @@ func dismiss_prompt() -> void:
 		print("Refused: choose a card")
 	elif kind == "alien_player" or kind == "alien_mimix_hand" or kind == "alien_mimix_copy" or kind == "alien_ugg":
 		cancel_alien_choice()
+	elif kind == "passenger_choice":
+		_choose_passenger("Stay")
 	else:
 		_close_prompt()
 
@@ -749,6 +756,7 @@ func _resolve_move_ability(hand_index: int, destination: String) -> bool:
 		_tile_name(destination),
 	])
 	_maybe_map(player, destination)
+	_queue_passenger(player, from_tile, destination)
 	state_changed.emit()
 	return true
 
@@ -1042,6 +1050,7 @@ func _move_to(player: Dictionary, destination: String) -> void:
 	_leave_for(player, destination, true)
 	_public("%s moved %s → %s" % [player["name"], _tile_name(from_tile), _tile_name(destination)])
 	_maybe_map(player, destination)
+	_queue_passenger(player, from_tile, destination)
 
 
 func _leave_for(player: Dictionary, destination: String, own_move: bool) -> void:
@@ -1348,8 +1357,11 @@ func _open_prompt(data: Dictionary) -> void:
 func _close_prompt() -> void:
 	if prompt.is_empty():
 		return
+	var kind := str(prompt.get("kind", ""))
 	prompt = {}
 	prompt_closed.emit()
+	if kind == "peek":
+		_resume_passenger()
 
 
 func _public(text: String) -> void:
@@ -1543,6 +1555,16 @@ func handoff_screen_dismissed() -> void:
 	if phase == "arrive":
 		var actor: Dictionary = players[int(_handoff["actor"])]
 		_handoff["phase"] = "choose"
+		if str(_handoff.get("purpose", "")) == "passenger":
+			_open_prompt({
+				"kind": "passenger_choice",
+				"title": str(actor["name"]),
+				"message": "Follow for 1 gold?",
+				"cards": [],
+				"clickable": false,
+				"buttons": ["Follow", "Stay"],
+			})
+			return
 		_open_prompt({
 			"kind": "handoff_card",
 			"title": str(actor["name"]),
@@ -1600,6 +1622,7 @@ func _resolve_wingo(tile_id: String) -> void:
 	_leave_for(player, tile_id, true)
 	_complete_use("%s used %s (%s → %s)" % [player["name"], _effect_label(), _tile_name(from_tile), _tile_name(tile_id)])
 	_maybe_map(player, tile_id)
+	_queue_passenger(player, from_tile, tile_id)
 
 
 func _begin_magnet() -> void:
@@ -1870,6 +1893,7 @@ func _resolve_gloop(target_index: int) -> void:
 	_complete_use("%s used %s (gave 1 purple to %s and swapped tiles)" % [user["name"], _effect_label(), target["name"]])
 	if from_user != from_target:
 		_maybe_map(user, str(user["tile"]))
+		_queue_passenger(user, from_user, str(user["tile"]))
 
 
 func _choose_alien_card(kind: String, index: int) -> void:
@@ -2038,6 +2062,120 @@ func _prompt_players(step: String, indexes: Array[int], title: String, message: 
 	})
 
 
+func _queue_passenger(mover: Dictionary, from_tile: String, destination: String) -> void:
+	if from_tile == destination or game_over or not _passenger.is_empty():
+		return
+	var queue: Array = _passenger_candidates(from_tile, int(mover["index"]))
+	if queue.is_empty():
+		return
+	_passenger = {
+		"queue": queue,
+		"destination": destination,
+		"from_tile": from_tile,
+		"mover_name": str(mover["name"]),
+		"waiting": not prompt.is_empty(),
+	}
+	if prompt.is_empty():
+		_next_passenger()
+
+
+func _passenger_candidates(from_tile: String, mover_index: int) -> Array:
+	var found: Array = []
+	var count := players.size()
+	for step in range(1, count):
+		var who: Dictionary = players[(current_index + step) % count]
+		if int(who["index"]) == mover_index:
+			continue
+		if str(who["tile"]) != from_tile:
+			continue
+		if not _wearing(who, "passenger_club_card"):
+			continue
+		if int(who["gold"]) < 1:
+			continue
+		found.append(int(who["index"]))
+	return found
+
+
+func _resume_passenger() -> void:
+	if _passenger.is_empty() or not bool(_passenger.get("waiting", false)):
+		return
+	_passenger["waiting"] = false
+	_next_passenger()
+
+
+func _next_passenger() -> void:
+	if _passenger.is_empty():
+		return
+	if game_over:
+		_passenger = {}
+		return
+	var queue: Array = _passenger["queue"]
+	while not queue.is_empty():
+		var idx: int = int(queue.pop_front())
+		var who: Dictionary = players[idx]
+		if str(who["tile"]) != str(_passenger["from_tile"]):
+			continue
+		if not _wearing(who, "passenger_club_card") or int(who["gold"]) < 1:
+			continue
+		_ask_passenger(who)
+		return
+	_passenger = {}
+
+
+func _ask_passenger(who: Dictionary) -> void:
+	var mover_name := str(_passenger["mover_name"])
+	var destination := str(_passenger["destination"])
+	var reason := "%s is leaving %s for %s." % [
+		mover_name,
+		_tile_name(str(_passenger["from_tile"])),
+		_tile_name(destination),
+	]
+	_handoff = {
+		"actor": int(who["index"]),
+		"reason": reason,
+		"purpose": "passenger",
+		"phase": "arrive",
+		"card_index": -1,
+		"follow": false,
+		"destination": destination,
+		"mover_name": mover_name,
+	}
+	handoff_screen.emit("%s, take the device." % str(who["name"]), reason, who["color"])
+
+
+func _choose_passenger(label: String) -> void:
+	if _handoff.is_empty() or (label != "Follow" and label != "Stay"):
+		return
+	_handoff["follow"] = label == "Follow"
+	_handoff["phase"] = "return"
+	_close_prompt()
+	var current := current_player()
+	handoff_screen.emit(
+		"Pass the device back to %s." % str(current["name"]),
+		"Click to continue.",
+		current["color"]
+	)
+
+
+func _finish_passenger_choice() -> void:
+	var actor_index: int = int(_handoff["actor"])
+	var follow := bool(_handoff["follow"])
+	var destination := str(_handoff["destination"])
+	var mover_name := str(_handoff["mover_name"])
+	_handoff = {}
+	var actor: Dictionary = players[actor_index]
+	if follow and int(actor["gold"]) >= 1 and str(actor["tile"]) != destination:
+		_add_gold(actor, -1)
+		_leave_for(actor, destination, true)
+		_public("%s followed %s to %s (Passenger Club, -1 gold)" % [
+			actor["name"],
+			mover_name,
+			_tile_name(destination),
+		])
+	_next_passenger()
+	state_changed.emit()
+
+
 func _begin_handoff(actor_index: int, reason: String, purpose: String) -> void:
 	var actor: Dictionary = players[actor_index]
 	_handoff = {
@@ -2051,6 +2189,9 @@ func _begin_handoff(actor_index: int, reason: String, purpose: String) -> void:
 
 
 func _apply_handoff_pick() -> void:
+	if str(_handoff.get("purpose", "")) == "passenger":
+		_finish_passenger_choice()
+		return
 	var actor_index := int(_handoff["actor"])
 	var card_index := int(_handoff["card_index"])
 	var purpose := str(_handoff["purpose"])

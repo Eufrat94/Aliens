@@ -65,7 +65,6 @@ const CARDS := {
 		"action": ActionType.MOVE,
 		"gear_mode": "passive",
 		"text": "When a player moves away from your tile, you may pay 1 gold to move with them.",
-		"soon": true,
 	},
 	"metal_detector": {
 		"id": "metal_detector",
