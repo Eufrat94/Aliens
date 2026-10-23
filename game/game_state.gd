@@ -1453,11 +1453,11 @@ func alien_use_reason(area_index: int) -> String:
 
 func alien_use_label(alien_id: String) -> String:
 	if alien_id == "mimix":
-		return "Use (1 + discard)"
+		return "Use (1 action + discard)"
 	var cost := _alien_purple_cost(alien_id)
 	if cost > 0:
-		return "Use (1 + %d purple)" % cost
-	return "Use (1)"
+		return "Use (1 action, %d purple)" % cost
+	return "Use (1 action)"
 
 
 func use_alien(area_index: int) -> void:
