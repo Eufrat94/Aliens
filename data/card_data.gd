@@ -5,7 +5,6 @@ enum Kind { GEAR, ABILITY, RESOURCE, ALIEN }
 enum ActionType { NONE, MOVE, SEARCH, INTERACT, FIGHT }
 
 const SOON_TEXT := "Effect coming soon."
-const ALIEN_SOON_TEXT := "Ability coming soon."
 const ALIEN_ACTIVE_NOTE := "Active: 1 action, once per turn. Other players on your tile gain 1 purple."
 
 const CARDS := {

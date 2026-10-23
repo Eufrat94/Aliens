@@ -94,6 +94,16 @@ static func get_neighbors(id: String) -> Array:
 	return neighbors
 
 
+static func grid_adjacent(tile_id: String) -> Array[String]:
+	var origin: Vector2i = get_tile(tile_id)["grid_pos"]
+	var found: Array[String] = []
+	for id in get_tile_ids():
+		var pos: Vector2i = get_tile(id)["grid_pos"]
+		if absi(pos.x - origin.x) + absi(pos.y - origin.y) == 1:
+			found.append(id)
+	return found
+
+
 static func has_interaction(tile_id: String) -> bool:
 	return tile_id == "village_market" or tile_id == "crystal_mount"
 

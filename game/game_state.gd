@@ -7,13 +7,18 @@ signal prompt_closed
 signal turn_ended
 signal skrim_announced(player_name: String)
 signal game_won(player_index: int)
+signal handoff_screen(title: String, hint: String, color: Color)
+signal public_banner(headline: String)
 
 const ACTIONS_PER_TURN := 3
 const GEAR_SLOTS := 4
 const DEBUG_SHOW_SECRETS := true
 const DEBUG_GIVE_ALL_ITEMS := false
 const DEBUG_START_ALIENS := 0
+const DEBUG_PLAYER_ALIENS: Dictionary = {}
+const DEBUG_START_PURPLE := 0
 const ALIENS_TO_WIN := 5
+const NERFOIL_HAND_LIMIT := 7
 const STARTING_GOLD := 5
 const STARTING_RESOURCES := 2
 const MARKET_OFFER_SIZE := 3
@@ -50,6 +55,13 @@ var crystal_pool := 0
 var game_over := false
 var winner_index := -1
 var _pending_end := false
+var alien_choice: Dictionary = {}
+var _handoff: Dictionary = {}
+var _incoming: Array = []
+var _delivering := false
+var _after_gains := ""
+var _finish_message := ""
+var _follow: Dictionary = {}
 
 
 func start_game(player_count: int) -> void:
@@ -72,9 +84,10 @@ func start_game(player_count: int) -> void:
 			"gear_used_this_turn": [],
 			"gold": STARTING_GOLD,
 			"market_offer": [],
-			"purple": 0,
+			"purple": DEBUG_START_PURPLE,
 			"lure_used_this_turn": false,
 			"aliens": [],
+			"aliens_used_this_turn": [],
 			"checklist": _blank_checklist(),
 		})
 	decks = {}
@@ -95,6 +108,13 @@ func start_game(player_count: int) -> void:
 	prompt = {}
 	market_visit = {}
 	_pending_end = false
+	alien_choice = {}
+	_handoff = {}
+	_incoming = []
+	_delivering = false
+	_after_gains = ""
+	_finish_message = ""
+	_follow = {}
 	_give_debug_aliens()
 	state_changed.emit()
 
@@ -444,7 +464,11 @@ func use_gear(slot: int) -> bool:
 
 
 func choose_prompt_card(index: int) -> void:
-	if prompt.is_empty() or str(prompt["kind"]) != "keep_one":
+	if prompt.is_empty():
+		return
+	var prompt_kind := str(prompt["kind"])
+	if prompt_kind != "keep_one":
+		_choose_alien_card(prompt_kind, index)
 		return
 	var shown: Array = prompt["cards"]
 	if index < 0 or index >= shown.size():
@@ -470,11 +494,11 @@ func choose_prompt_card(index: int) -> void:
 		other = first
 	deck.append(other)
 	var player := current_player()
-	_add_to_hand(player, kept)
-	found_card_ids.append(kept)
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(kept)["name"]])
 	_secret("%s put back: %s" % [player["name"], CardData.get_card(other)["name"]])
 	_close_prompt()
+	found_card_ids.append(kept)
+	_give_card(player, kept)
 	state_changed.emit()
 
 
@@ -501,6 +525,11 @@ func choose_prompt_button(label: String) -> void:
 			_close_prompt()
 	elif kind == "tracker_pick":
 		_resolve_tracker(label)
+	elif kind == "alien_player" or kind == "alien_mimix_hand" or kind == "alien_mimix_copy" or kind == "alien_ugg":
+		if label == "Cancel":
+			cancel_alien_choice()
+		else:
+			_choose_alien_button(label)
 	else:
 		_close_prompt()
 
@@ -517,6 +546,10 @@ func dismiss_prompt() -> void:
 		choose_prompt_button("Done")
 	elif kind == "radio_pick":
 		_resolve_radio("Skip")
+	elif kind == "nerfoil_discard" or kind == "handoff_card" or kind == "pucky_discard":
+		print("Refused: choose a card")
+	elif kind == "alien_player" or kind == "alien_mimix_hand" or kind == "alien_mimix_copy" or kind == "alien_ugg":
+		cancel_alien_choice()
 	else:
 		_close_prompt()
 
@@ -581,7 +614,7 @@ func market_sell(resource_hand_index: int) -> bool:
 		print("Refused: only resources can be sold")
 		return false
 	_take_from_hand(player, resource_hand_index)
-	player["gold"] = int(player["gold"]) + MARKET_SELL_PRICE
+	_add_gold(player, MARKET_SELL_PRICE)
 	market_visit["sold"] = int(market_visit["sold"]) + 1
 	state_changed.emit()
 	return true
@@ -604,8 +637,8 @@ func market_buy(offer_slot: int) -> bool:
 		print("Refused: not enough gold")
 		return false
 	offer[offer_slot] = ""
-	player["gold"] = int(player["gold"]) - MARKET_BUY_PRICE
-	_add_to_hand(player, card_id)
+	_add_gold(player, -MARKET_BUY_PRICE)
+	_give_card(player, card_id)
 	var bought: Array = market_visit["bought"]
 	bought.append(card_id)
 	state_changed.emit()
@@ -653,6 +686,7 @@ func _advance_turn() -> void:
 	actions_left = ACTIONS_PER_TURN
 	var starting := current_player()
 	starting["gear_used_this_turn"] = []
+	starting["aliens_used_this_turn"] = []
 	starting["lure_used_this_turn"] = false
 	print("--- %s's turn ---" % starting["name"])
 	state_changed.emit()
@@ -707,15 +741,13 @@ func _resolve_move_ability(hand_index: int, destination: String) -> bool:
 	var player := current_player()
 	var card := _commit_ability(player, hand_index)
 	var from_tile: String = player["tile"]
-	player["tile"] = destination
+	_leave_for(player, destination, true)
 	_public("%s played %s (%s → %s)" % [
 		player["name"],
 		card["name"],
 		_tile_name(from_tile),
 		_tile_name(destination),
 	])
-	if destination == START_TILE and from_tile != START_TILE:
-		refresh_market_offer(player)
 	_maybe_map(player, destination)
 	state_changed.emit()
 	return true
@@ -731,7 +763,7 @@ func _resolve_claw(hand_index: int, tile_id: String, from_bottom: bool) -> bool:
 	var player := current_player()
 	var drawn := _pull(decks[tile_id], from_bottom)
 	_commit_ability(player, hand_index)
-	_add_to_hand(player, drawn)
+	_give_card(player, drawn)
 	found_card_ids.append(drawn)
 	_public("%s played Grappling Claw (from %s)" % [player["name"], _tile_name(tile_id)])
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
@@ -765,7 +797,7 @@ func _perform_base_search(from_bottom: bool) -> bool:
 		return false
 	var drawn := _pull(decks[tile_id], from_bottom)
 	actions_left -= 1
-	_add_to_hand(player, drawn)
+	_give_card(player, drawn)
 	found_card_ids.append(drawn)
 	_public("%s searched %s" % [player["name"], _tile_name(tile_id)])
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
@@ -781,7 +813,7 @@ func _fishing_net(player: Dictionary, hand_index: int, tile_id: String) -> bool:
 		drawn.append(_pull(deck, true))
 	_commit_ability(player, hand_index)
 	for card_id in drawn:
-		_add_to_hand(player, card_id)
+		_give_card(player, card_id)
 		found_card_ids.append(card_id)
 		_secret("%s drew: %s" % [player["name"], CardData.get_card(card_id)["name"]])
 	_public("%s played Fishing Net" % player["name"])
@@ -804,7 +836,7 @@ func _ancient_trowel(player: Dictionary, hand_index: int, tile_id: String, from_
 	_commit_ability(player, hand_index)
 	for i in drawn.size():
 		var card_id: String = drawn[i]
-		_add_to_hand(player, card_id)
+		_give_card(player, card_id)
 		found_card_ids.append(card_id)
 		if i < pulls and CardData.is_resource(card_id):
 			_public("%s revealed %s (Ancient Trowel)" % [player["name"], CardData.get_card(card_id)["name"]])
@@ -819,10 +851,14 @@ func _cargo_manifest(player: Dictionary, hand_index: int, tile_id: String, from_
 	var deck: Array = decks[tile_id]
 	var drawn := _pull(deck, from_bottom)
 	_commit_ability(player, hand_index)
-	_add_to_hand(player, drawn)
+	_give_card(player, drawn)
 	found_card_ids.append(drawn)
 	_public("%s played Cargo Manifest" % player["name"])
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
+	if _gain_waiting():
+		_follow = {"kind": "cargo", "tile_id": tile_id, "from_bottom": from_bottom}
+		state_changed.emit()
+		return true
 	var shown := _next_pair(deck, from_bottom)
 	state_changed.emit()
 	if shown.is_empty():
@@ -866,7 +902,7 @@ func _finish_gear_use(slot: int, from_bottom: bool) -> bool:
 	var deck: Array = decks[tile_id]
 	if deck.size() < 2:
 		var drawn := _pull(deck, from_bottom)
-		_add_to_hand(player, drawn)
+		_give_card(player, drawn)
 		found_card_ids.append(drawn)
 		_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
 		state_changed.emit()
@@ -1003,11 +1039,20 @@ func _lure_applies() -> bool:
 
 func _move_to(player: Dictionary, destination: String) -> void:
 	var from_tile: String = player["tile"]
-	player["tile"] = destination
+	_leave_for(player, destination, true)
 	_public("%s moved %s → %s" % [player["name"], _tile_name(from_tile), _tile_name(destination)])
+	_maybe_map(player, destination)
+
+
+func _leave_for(player: Dictionary, destination: String, own_move: bool) -> void:
+	var from_tile := str(player["tile"])
+	if from_tile == destination:
+		return
+	if own_move:
+		_charge_muddk(player, from_tile)
+	player["tile"] = destination
 	if destination == START_TILE and from_tile != START_TILE:
 		refresh_market_offer(player)
-	_maybe_map(player, destination)
 
 
 func _maybe_map(player: Dictionary, tile_id: String) -> void:
@@ -1166,7 +1211,7 @@ func _market_log(player: Dictionary, sold_count: int, bought: Array) -> String:
 
 
 func _is_busy() -> bool:
-	return not prompt.is_empty() or not market_visit.is_empty()
+	return not prompt.is_empty() or not market_visit.is_empty() or not alien_choice.is_empty() or not _handoff.is_empty() or _delivering
 
 
 func _turn_block() -> String:
@@ -1187,7 +1232,11 @@ func _blank_checklist() -> Dictionary:
 
 
 func _deal_aliens() -> void:
-	var ids: Array[String] = CardData.all_alien_ids()
+	var reserved := _reserved_aliens()
+	var ids: Array[String] = []
+	for alien_id in CardData.all_alien_ids():
+		if alien_id not in reserved:
+			ids.append(alien_id)
 	ids.shuffle()
 	missing_alien = ids.pop_back()
 	_secret("Missing alien: %s" % str(CardData.get_card(missing_alien)["name"]))
@@ -1202,6 +1251,7 @@ func _deal_aliens() -> void:
 	for tile_id in SEARCH_TILES:
 		var deck: Array = decks[tile_id]
 		deck.shuffle()
+	_place_debug_aliens()
 
 
 func _give_debug_aliens() -> void:
@@ -1360,3 +1410,1013 @@ func _name_list(card_ids: Array) -> String:
 	for card_id in card_ids:
 		names.append(str(CardData.get_card(str(card_id))["name"]))
 	return ", ".join(names)
+
+
+func can_use_alien(area_index: int) -> bool:
+	if not _area_is_active(area_index):
+		return false
+	return alien_use_reason(area_index) == ""
+
+
+func alien_use_reason(area_index: int) -> String:
+	if players.is_empty() or not _area_is_active(area_index):
+		return ""
+	if game_over:
+		return "The game is over"
+	if _is_busy():
+		return "Finish the current choice first"
+	if actions_left < 1:
+		return "No actions left"
+	var alien_id := _area_alien(area_index)
+	var used: Array = current_player()["aliens_used_this_turn"]
+	if alien_id in used:
+		return "Already used this turn"
+	if _blocked_by_stopots(current_player()):
+		return "Blocked by Stopots"
+	var cost := _alien_purple_cost(alien_id)
+	if int(current_player()["purple"]) < cost:
+		return "Needs %d purple" % cost
+	return _alien_target_reason(alien_id)
+
+
+func alien_use_label(alien_id: String) -> String:
+	if alien_id == "mimix":
+		return "Use (1 + discard)"
+	var cost := _alien_purple_cost(alien_id)
+	if cost > 0:
+		return "Use (1 + %d purple)" % cost
+	return "Use (1)"
+
+
+func use_alien(area_index: int) -> void:
+	if not can_use_alien(area_index):
+		var reason := alien_use_reason(area_index)
+		print("Refused: %s" % (reason if reason != "" else "that alien cannot be used"))
+		return
+	var alien_id := _area_alien(area_index)
+	alien_choice = {
+		"area_index": area_index,
+		"alien_id": alien_id,
+		"effect_id": alien_id,
+		"step": "",
+		"mimix_index": -1,
+		"target": -1,
+		"bonus": [],
+	}
+	if alien_id == "mimix":
+		_prompt_mimix_hand()
+		return
+	_begin_effect(alien_id)
+
+
+func can_cancel_alien() -> bool:
+	return not alien_choice.is_empty() and prompt.is_empty() and _handoff.is_empty() and not _delivering
+
+
+func is_alien_pending() -> bool:
+	return not alien_choice.is_empty() or not _handoff.is_empty() or _delivering
+
+
+func cancel_alien_choice() -> void:
+	if alien_choice.is_empty() and _handoff.is_empty():
+		return
+	if not _handoff.is_empty() or _delivering:
+		print("Refused: choose a card")
+		return
+	if not prompt.is_empty():
+		var kind := str(prompt["kind"])
+		if kind == "nerfoil_discard" or kind == "handoff_card" or kind == "pucky_discard":
+			print("Refused: choose a card")
+			return
+		_close_prompt()
+	alien_choice = {}
+	state_changed.emit()
+
+
+func alien_hint() -> String:
+	if alien_choice.is_empty():
+		return ""
+	var step := str(alien_choice.get("step", ""))
+	if step == "wingo":
+		return "Wingo: choose any other tile (Esc to cancel)"
+	if step == "wush_tile":
+		return "Wush: choose a tile next to that player (Esc to cancel)"
+	return ""
+
+
+func alien_tile_targets() -> Array[String]:
+	var found: Array[String] = []
+	if alien_choice.is_empty() or not prompt.is_empty():
+		return found
+	var step := str(alien_choice.get("step", ""))
+	if step == "wingo":
+		var here := str(current_player()["tile"])
+		for tile_id in BoardData.get_tile_ids():
+			if tile_id != here:
+				found.append(tile_id)
+		return found
+	if step == "wush_tile":
+		var target: Dictionary = players[int(alien_choice["target"])]
+		return BoardData.grid_adjacent(str(target["tile"]))
+	return found
+
+
+func choose_alien_tile(tile_id: String) -> void:
+	if tile_id not in alien_tile_targets():
+		print("Refused: that tile isn't a choice")
+		return
+	var step := str(alien_choice.get("step", ""))
+	if step == "wingo":
+		_resolve_wingo(tile_id)
+	elif step == "wush_tile":
+		_resolve_wush(tile_id)
+
+
+func handoff_phase() -> String:
+	if _handoff.is_empty():
+		return ""
+	return str(_handoff.get("phase", ""))
+
+
+func handoff_screen_dismissed() -> void:
+	var phase := handoff_phase()
+	if phase == "arrive":
+		var actor: Dictionary = players[int(_handoff["actor"])]
+		_handoff["phase"] = "choose"
+		_open_prompt({
+			"kind": "handoff_card",
+			"title": str(actor["name"]),
+			"message": str(_handoff["reason"]),
+			"cards": _hand_ids(actor),
+			"clickable": true,
+			"buttons": [],
+		})
+		return
+	if phase == "return":
+		_apply_handoff_pick()
+
+
+func _begin_effect(effect_id: String) -> void:
+	alien_choice["effect_id"] = effect_id
+	alien_choice["step"] = effect_id
+	match effect_id:
+		"wingo":
+			state_changed.emit()
+		"magnet":
+			_begin_magnet()
+		"disko":
+			_resolve_disko()
+		"mani":
+			_resolve_mani()
+		"ugg":
+			_prompt_ugg()
+		"wush":
+			_prompt_players("wush", _other_indexes(), "Wush", "Choose a player to move.")
+		"shadow":
+			_resolve_shadow()
+		"pucky":
+			_prompt_players("pucky", _players_with_cards(), "Pucky", "Choose a player to take a card from.")
+		"pikupiku":
+			var here := _others_here_with_cards()
+			if here.size() == 1:
+				_resolve_pikupiku(here[0])
+			else:
+				_prompt_players("pikupiku", here, "Pikupiku", "Choose a player on your tile.")
+		"quizazz":
+			_prompt_players("quizazz", _other_indexes(), "Quizazz", "Choose a player to ask.")
+		"gloop":
+			_prompt_players("gloop", _other_indexes(), "Gloop", "Choose a player to swap with.")
+		_:
+			print("Refused: that alien cannot be used")
+			_drop_choice()
+
+
+func _resolve_wingo(tile_id: String) -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var player := current_player()
+	var from_tile := str(player["tile"])
+	_leave_for(player, tile_id, true)
+	_complete_use("%s used %s (%s → %s)" % [player["name"], _effect_label(), _tile_name(from_tile), _tile_name(tile_id)])
+	_maybe_map(player, tile_id)
+
+
+func _begin_magnet() -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	alien_choice["queue"] = _others_here_with_cards()
+	alien_choice["step"] = "magnet"
+	_next_magnet()
+
+
+func _next_magnet() -> void:
+	if alien_choice.is_empty() or game_over:
+		if not alien_choice.is_empty():
+			_complete_use("")
+		return
+	var queue: Array = alien_choice["queue"]
+	if queue.is_empty():
+		_complete_use("")
+		return
+	var next_index := int(queue.pop_front())
+	_begin_handoff(next_index, "%s used Magnet: choose a card to give." % str(current_player()["name"]), "magnet")
+
+
+func _resolve_disko() -> void:
+	if discard.is_empty():
+		print("Refused: Discard pile is empty")
+		_drop_choice()
+		return
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var card_id := str(discard.pop_back())
+	_finish_message = "%s took %s (%s)" % [current_player()["name"], CardData.get_card(card_id)["name"], _effect_label()]
+	_after_gains = "finish"
+	_give_card(current_player(), card_id)
+
+
+func _resolve_mani() -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	_add_gold(current_player(), 5)
+	_complete_use("%s used %s (+5 gold)" % [current_player()["name"], _effect_label()])
+
+
+func _prompt_ugg() -> void:
+	var entries := _aliens_in_areas()
+	if entries.is_empty():
+		print("Refused: No aliens on the table")
+		_drop_choice()
+		return
+	alien_choice["step"] = "ugg"
+	var cards: Array[String] = []
+	var captions: Array[String] = []
+	var owners: Array[int] = []
+	var slots: Array[int] = []
+	for entry in entries:
+		var info: Dictionary = entry
+		cards.append(str(info["id"]))
+		captions.append(str(info["owner_name"]))
+		owners.append(int(info["owner"]))
+		slots.append(int(info["slot"]))
+	_open_prompt({
+		"kind": "alien_ugg",
+		"title": "Ugg",
+		"message": "Choose an alien on the table to discard.",
+		"cards": cards,
+		"captions": captions,
+		"clickable": true,
+		"buttons": ["Cancel"],
+		"owners": owners,
+		"slots": slots,
+	})
+
+
+func _accept_ugg(index: int) -> void:
+	var owners: Array = prompt["owners"]
+	var slots: Array = prompt["slots"]
+	var cards: Array = prompt["cards"]
+	var owner_index := int(owners[index])
+	var slot := int(slots[index])
+	var alien_id := str(cards[index])
+	_close_prompt()
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var owner: Dictionary = players[owner_index]
+	_remove_area_alien(owner, slot, alien_id)
+	discard.append(alien_id)
+	_complete_use("%s discarded %s's %s (%s)" % [
+		current_player()["name"],
+		owner["name"],
+		CardData.get_card(alien_id)["name"],
+		_effect_label(),
+	])
+
+
+func _resolve_wush(tile_id: String) -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var target: Dictionary = players[int(alien_choice["target"])]
+	_leave_for(target, tile_id, false)
+	_complete_use("%s used %s (%s → %s)" % [
+		current_player()["name"],
+		_effect_label(),
+		target["name"],
+		_tile_name(tile_id),
+	])
+
+
+func _resolve_shadow() -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var user := current_player()
+	var count := players.size()
+	for step in range(1, count):
+		var who: Dictionary = players[(current_index + step) % count]
+		if int(who["gold"]) <= 0:
+			continue
+		_add_gold(who, -1)
+		_add_gold(user, 1)
+		_public("%s gave 1 gold to %s (Shadow)" % [who["name"], user["name"]])
+	_complete_use("")
+
+
+func _resolve_pucky(target_index: int) -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var target: Dictionary = players[target_index]
+	var hand: Array = target["hand"]
+	if hand.is_empty():
+		print("Refused: no card there")
+		_drop_choice()
+		return
+	var card_id := _take_from_hand(target, randi() % hand.size())
+	_public("%s took a card from %s (%s)" % [current_player()["name"], target["name"], _effect_label()])
+	_secret("%s took %s from %s" % [current_player()["name"], CardData.get_card(card_id)["name"], target["name"]])
+	_after_gains = "pucky_discard"
+	_give_card(current_player(), card_id)
+
+
+func _prompt_pucky_discard() -> void:
+	alien_choice["step"] = "pucky_discard"
+	_open_prompt({
+		"kind": "pucky_discard",
+		"title": "Pucky",
+		"message": "Discard 1 card from your hand.",
+		"cards": _hand_ids(current_player()),
+		"clickable": true,
+		"buttons": [],
+	})
+
+
+func _resolve_pikupiku(target_index: int) -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var target: Dictionary = players[target_index]
+	var cards := _hand_ids(target)
+	_secret("%s saw %s's hand: %s" % [current_player()["name"], target["name"], _name_list(cards)])
+	_complete_use("%s looked at %s's hand (%s)" % [current_player()["name"], target["name"], _effect_label()])
+	_open_prompt({
+		"kind": "peek",
+		"title": "Pikupiku",
+		"message": "%s's hand." % str(target["name"]),
+		"cards": cards,
+		"clickable": false,
+		"buttons": ["Done"],
+	})
+
+
+func _resolve_quizazz(target_index: int) -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var target: Dictionary = players[target_index]
+	var has_alien := false
+	var hand: Array = target["hand"]
+	for card_id in hand:
+		if CardData.is_alien(str(card_id)):
+			has_alien = true
+			break
+	var answer := "YES" if has_alien else "NO"
+	var headline := "%s has an alien in hand: %s" % [target["name"], answer]
+	_public(headline)
+	public_banner.emit(headline)
+	if has_alien:
+		current_player()["purple"] = int(current_player()["purple"]) + 1
+	else:
+		_add_gold(current_player(), 1)
+	_complete_use("")
+
+
+func _prompt_mimix_hand() -> void:
+	alien_choice["step"] = "mimix_hand"
+	_open_prompt({
+		"kind": "alien_mimix_hand",
+		"title": "Mimix",
+		"message": "Choose a card to discard. You pay it when the copy is confirmed.",
+		"cards": _hand_ids(current_player()),
+		"clickable": true,
+		"buttons": ["Cancel"],
+	})
+
+
+func _accept_mimix_discard(index: int) -> void:
+	var hand: Array = current_player()["hand"]
+	if index < 0 or index >= hand.size():
+		return
+	alien_choice["mimix_index"] = index
+	_close_prompt()
+	var copies := _copyable_aliens()
+	if copies.is_empty():
+		print("Refused: No active aliens on the table")
+		_drop_choice()
+		return
+	alien_choice["step"] = "mimix_copy"
+	var cards: Array[String] = []
+	var captions: Array[String] = []
+	for entry in copies:
+		var info: Dictionary = entry
+		cards.append(str(info["id"]))
+		captions.append("%s's %s" % [info["owner_name"], CardData.get_card(str(info["id"]))["name"]])
+	_open_prompt({
+		"kind": "alien_mimix_copy",
+		"title": "Mimix",
+		"message": "Choose an active alien to copy.",
+		"cards": cards,
+		"captions": captions,
+		"clickable": true,
+		"buttons": ["Cancel"],
+	})
+
+
+func _accept_mimix_copy(index: int) -> void:
+	var cards: Array = prompt["cards"]
+	var effect_id := str(cards[index])
+	var cost := _alien_purple_cost(effect_id)
+	if int(current_player()["purple"]) < cost:
+		print("Refused: Needs %d purple" % cost)
+		return
+	_close_prompt()
+	_begin_effect(effect_id)
+
+
+func _resolve_gloop(target_index: int) -> void:
+	if not _pay_for_alien():
+		_drop_choice()
+		return
+	var user := current_player()
+	var target: Dictionary = players[target_index]
+	user["purple"] = int(user["purple"]) - 1
+	target["purple"] = int(target["purple"]) + 1
+	var from_user := str(user["tile"])
+	var from_target := str(target["tile"])
+	if from_user != from_target:
+		_charge_muddk(user, from_user)
+		user["tile"] = from_target
+		target["tile"] = from_user
+		if from_target == START_TILE and from_user != START_TILE:
+			refresh_market_offer(user)
+		if from_user == START_TILE and from_target != START_TILE:
+			refresh_market_offer(target)
+	_complete_use("%s used %s (gave 1 purple to %s and swapped tiles)" % [user["name"], _effect_label(), target["name"]])
+	if from_user != from_target:
+		_maybe_map(user, str(user["tile"]))
+
+
+func _choose_alien_card(kind: String, index: int) -> void:
+	if prompt.is_empty():
+		return
+	var cards: Array = prompt["cards"]
+	if index < 0 or index >= cards.size():
+		return
+	if kind == "handoff_card":
+		_handoff["card_index"] = index
+		_handoff["phase"] = "return"
+		_close_prompt()
+		var current := current_player()
+		handoff_screen.emit(
+			"Pass the device back to %s." % str(current["name"]),
+			"Click to continue.",
+			current["color"]
+		)
+		return
+	if kind == "nerfoil_discard":
+		var discarding := current_player()
+		_close_prompt()
+		_discard_from_hand(discarding, index)
+		_public("%s discarded a card (Nerfoil)" % str(discarding["name"]))
+		_delivering = false
+		state_changed.emit()
+		_pump_incoming()
+		return
+	if kind == "pucky_discard":
+		var discarding := current_player()
+		_close_prompt()
+		_discard_from_hand(discarding, index)
+		_public("%s discarded a card (Pucky)" % str(discarding["name"]))
+		_complete_use("")
+		return
+	if kind == "alien_mimix_hand":
+		_accept_mimix_discard(index)
+		return
+	if kind == "alien_mimix_copy":
+		_accept_mimix_copy(index)
+		return
+	if kind == "alien_ugg":
+		_accept_ugg(index)
+
+
+func _choose_alien_button(label: String) -> void:
+	if prompt.is_empty():
+		return
+	var player_for: Dictionary = prompt["player_for"]
+	if not player_for.has(label):
+		return
+	var target_index := int(player_for[label])
+	var step := str(alien_choice.get("step", ""))
+	_close_prompt()
+	match step:
+		"wush":
+			alien_choice["target"] = target_index
+			alien_choice["step"] = "wush_tile"
+			state_changed.emit()
+		"pucky":
+			_resolve_pucky(target_index)
+		"pikupiku":
+			_resolve_pikupiku(target_index)
+		"quizazz":
+			_resolve_quizazz(target_index)
+		"gloop":
+			_resolve_gloop(target_index)
+		_:
+			_drop_choice()
+
+
+func _pay_for_alien() -> bool:
+	var effect_id := str(alien_choice["effect_id"])
+	var user := current_player()
+	var cost := _alien_purple_cost(effect_id)
+	if int(user["purple"]) < cost:
+		print("Refused: Needs %d purple" % cost)
+		return false
+	var discard_index := -1
+	if str(alien_choice["alien_id"]) == "mimix":
+		discard_index = int(alien_choice.get("mimix_index", -1))
+		var hand: Array = user["hand"]
+		if discard_index < 0 or discard_index >= hand.size():
+			print("Refused: Need a card to discard")
+			return false
+	if discard_index >= 0:
+		_discard_from_hand(user, discard_index)
+		_public("%s discarded a card (Mimix)" % str(user["name"]))
+	if effect_id != "gloop":
+		user["purple"] = int(user["purple"]) - cost
+	actions_left -= 1
+	var used: Array = user["aliens_used_this_turn"]
+	var marker := str(alien_choice["alien_id"])
+	if marker not in used:
+		used.append(marker)
+	var bonus: Array[int] = []
+	var tile := str(user["tile"])
+	for player in players:
+		var who: Dictionary = player
+		if int(who["index"]) == int(user["index"]):
+			continue
+		if str(who["tile"]) == tile:
+			bonus.append(int(who["index"]))
+	alien_choice["bonus"] = bonus
+	return true
+
+
+func _complete_use(message: String) -> void:
+	if message != "":
+		_public(message)
+	_grant_purple_bonus()
+	alien_choice = {}
+	state_changed.emit()
+
+
+func _grant_purple_bonus() -> void:
+	if alien_choice.is_empty():
+		return
+	var ids: Array = alien_choice.get("bonus", [])
+	if ids.is_empty():
+		return
+	var names: PackedStringArray = PackedStringArray()
+	for entry in ids:
+		var who: Dictionary = players[int(entry)]
+		who["purple"] = int(who["purple"]) + 1
+		names.append(str(who["name"]))
+	var alien_name := str(CardData.get_card(str(alien_choice["alien_id"]))["name"])
+	_public("%s gained 1 purple (%s)" % [", ".join(names), alien_name])
+
+
+func _drop_choice() -> void:
+	alien_choice = {}
+	state_changed.emit()
+
+
+func _effect_label() -> String:
+	var alien_id := str(alien_choice["alien_id"])
+	var effect_id := str(alien_choice["effect_id"])
+	if alien_id == "mimix" and effect_id != alien_id:
+		return "Mimix as %s" % str(CardData.get_card(effect_id)["name"])
+	return str(CardData.get_card(effect_id)["name"])
+
+
+func _prompt_players(step: String, indexes: Array[int], title: String, message: String) -> void:
+	if indexes.is_empty():
+		print("Refused: No other player")
+		_drop_choice()
+		return
+	alien_choice["step"] = step
+	var buttons: Array[String] = []
+	var player_for := {}
+	for idx in indexes:
+		var who: Dictionary = players[idx]
+		var player_name := str(who["name"])
+		buttons.append(player_name)
+		player_for[player_name] = idx
+	buttons.append("Cancel")
+	_open_prompt({
+		"kind": "alien_player",
+		"title": title,
+		"message": message,
+		"cards": [],
+		"clickable": false,
+		"buttons": buttons,
+		"player_for": player_for,
+	})
+
+
+func _begin_handoff(actor_index: int, reason: String, purpose: String) -> void:
+	var actor: Dictionary = players[actor_index]
+	_handoff = {
+		"actor": actor_index,
+		"reason": reason,
+		"purpose": purpose,
+		"phase": "arrive",
+		"card_index": -1,
+	}
+	handoff_screen.emit("%s, take the device." % str(actor["name"]), reason, actor["color"])
+
+
+func _apply_handoff_pick() -> void:
+	var actor_index := int(_handoff["actor"])
+	var card_index := int(_handoff["card_index"])
+	var purpose := str(_handoff["purpose"])
+	_handoff = {}
+	var actor: Dictionary = players[actor_index]
+	var hand: Array = actor["hand"]
+	if card_index < 0 or card_index >= hand.size():
+		print("Refused: no card there")
+		return
+	if purpose == "nerfoil":
+		_discard_from_hand(actor, card_index)
+		_public("%s discarded a card (Nerfoil)" % str(actor["name"]))
+		_delivering = false
+		state_changed.emit()
+		_pump_incoming()
+		return
+	var card_id := _take_from_hand(actor, card_index)
+	_public("%s gave a card to %s (Magnet)" % [actor["name"], current_player()["name"]])
+	_secret("%s gave %s to %s" % [actor["name"], CardData.get_card(card_id)["name"], current_player()["name"]])
+	_after_gains = "magnet_next"
+	_give_card(current_player(), card_id)
+
+
+func _give_card(player: Dictionary, card_id: String) -> void:
+	_incoming.append({"index": int(player["index"]), "card_id": card_id})
+	_pump_incoming()
+
+
+func _gain_waiting() -> bool:
+	return _delivering or not _incoming.is_empty()
+
+
+func _pump_incoming() -> void:
+	if _delivering:
+		return
+	var added := false
+	while not _incoming.is_empty():
+		if game_over:
+			_flush_incoming()
+			return
+		var next: Dictionary = _incoming[0]
+		var player: Dictionary = players[int(next["index"])]
+		var hand: Array = player["hand"]
+		if _nerfoil_applies(player) and hand.size() >= NERFOIL_HAND_LIMIT:
+			_delivering = true
+			_ask_nerfoil(player)
+			return
+		_incoming.pop_front()
+		_add_to_hand(player, str(next["card_id"]))
+		added = true
+		if game_over:
+			_flush_incoming()
+			return
+	if added and _after_gains == "" and _follow.is_empty():
+		state_changed.emit()
+	_run_after_gains()
+
+
+func _flush_incoming() -> void:
+	while not _incoming.is_empty():
+		var next: Dictionary = _incoming.pop_front()
+		var player: Dictionary = players[int(next["index"])]
+		_add_to_hand(player, str(next["card_id"]))
+	_delivering = false
+	_after_gains = ""
+	_finish_message = ""
+	_follow = {}
+	alien_choice = {}
+	state_changed.emit()
+
+
+func _ask_nerfoil(player: Dictionary) -> void:
+	if int(player["index"]) == current_index:
+		_open_prompt({
+			"kind": "nerfoil_discard",
+			"title": "Nerfoil",
+			"message": "Your hand is at 7 cards. Discard 1, then you gain a card.",
+			"cards": _hand_ids(player),
+			"clickable": true,
+			"buttons": [],
+		})
+		return
+	_begin_handoff(int(player["index"]), "%s must discard a card (Nerfoil)." % str(player["name"]), "nerfoil")
+
+
+func _run_after_gains() -> void:
+	if _delivering or not _incoming.is_empty():
+		return
+	if game_over:
+		_after_gains = ""
+		_finish_message = ""
+		_follow = {}
+		alien_choice = {}
+		state_changed.emit()
+		return
+	var follow: Dictionary = _follow.duplicate()
+	var after := _after_gains
+	var message := _finish_message
+	_follow = {}
+	_after_gains = ""
+	_finish_message = ""
+	if str(follow.get("kind", "")) == "cargo":
+		_open_cargo_reorder(str(follow["tile_id"]), bool(follow["from_bottom"]))
+	if after == "magnet_next":
+		_next_magnet()
+	elif after == "pucky_discard":
+		_prompt_pucky_discard()
+	elif after == "finish":
+		_complete_use(message)
+
+
+func _open_cargo_reorder(tile_id: String, from_bottom: bool) -> void:
+	var deck: Array = decks[tile_id]
+	var shown := _next_pair(deck, from_bottom)
+	if shown.is_empty():
+		state_changed.emit()
+		return
+	var buttons: Array[String] = []
+	if shown.size() > 1:
+		buttons.append("Swap order")
+	buttons.append("Done")
+	state_changed.emit()
+	_open_prompt({
+		"kind": "reorder",
+		"title": "Cargo Manifest",
+		"message": "The next cards of the %s deck. Put them back in any order." % _tile_name(tile_id),
+		"cards": shown,
+		"clickable": false,
+		"buttons": buttons,
+		"tile_id": tile_id,
+		"from_bottom": from_bottom,
+	})
+
+
+func _add_gold(player: Dictionary, amount: int) -> void:
+	player["gold"] = int(player["gold"]) + amount
+	_shadow_check(player)
+
+
+func _shadow_check(player: Dictionary) -> void:
+	if int(player["gold"]) < 9:
+		return
+	if not _remove_area_alien(player, -1, "shadow"):
+		return
+	discard.append("shadow")
+	_public("%s's Shadow left (9+ gold)" % str(player["name"]))
+
+
+func _charge_muddk(mover: Dictionary, from_tile: String) -> void:
+	var count := players.size()
+	var start := int(mover["index"])
+	for step in range(1, count):
+		var who: Dictionary = players[(start + step) % count]
+		if str(who["tile"]) != from_tile or not _area_has(who, "muddk"):
+			continue
+		if int(mover["gold"]) <= 0:
+			return
+		_add_gold(mover, -1)
+		_add_gold(who, 1)
+		_public("%s paid 1 gold to %s (Muddk)" % [mover["name"], who["name"]])
+
+
+func _nerfoil_applies(player: Dictionary) -> bool:
+	for other in players:
+		var who: Dictionary = other
+		if int(who["index"]) == int(player["index"]):
+			continue
+		if _area_has(who, "nerfoil"):
+			return true
+	return false
+
+
+func _blocked_by_stopots(user: Dictionary) -> bool:
+	var tile := str(user["tile"])
+	for other in players:
+		var who: Dictionary = other
+		if int(who["index"]) == int(user["index"]):
+			continue
+		if str(who["tile"]) == tile and _area_has(who, "stopots"):
+			return true
+	return false
+
+
+func _alien_purple_cost(alien_id: String) -> int:
+	match alien_id:
+		"wingo", "mani", "pikupiku", "gloop":
+			return 1
+		"ugg":
+			return 3
+		_:
+			return 0
+
+
+func _alien_target_reason(alien_id: String) -> String:
+	match alien_id:
+		"magnet":
+			if _others_on_tile().is_empty():
+				return "No other player here"
+			if _others_here_with_cards().is_empty():
+				return "Nobody here has a card"
+		"disko":
+			if discard.is_empty():
+				return "Discard pile is empty"
+		"ugg":
+			if _aliens_in_areas().is_empty():
+				return "No aliens on the table"
+		"wush", "quizazz", "gloop":
+			if _other_indexes().is_empty():
+				return "No other player"
+		"shadow":
+			if not _other_has_gold():
+				return "No other player has gold"
+		"pucky":
+			if _players_with_cards().is_empty():
+				return "No other player has a card"
+		"pikupiku":
+			if _others_on_tile().is_empty():
+				return "No other player here"
+			if _others_here_with_cards().is_empty():
+				return "Nobody here has a card"
+		"mimix":
+			var mimix_hand: Array = current_player()["hand"]
+			if mimix_hand.is_empty():
+				return "Need a card to discard"
+			if _copyable_aliens().is_empty():
+				return "No active aliens on the table"
+	return ""
+
+
+func _other_indexes() -> Array[int]:
+	var found: Array[int] = []
+	var count := players.size()
+	for step in range(1, count):
+		var who: Dictionary = players[(current_index + step) % count]
+		found.append(int(who["index"]))
+	return found
+
+
+func _others_on_tile() -> Array[int]:
+	var found: Array[int] = []
+	var tile := str(current_player()["tile"])
+	for idx in _other_indexes():
+		var who: Dictionary = players[idx]
+		if str(who["tile"]) == tile:
+			found.append(idx)
+	return found
+
+
+func _others_here_with_cards() -> Array[int]:
+	var found: Array[int] = []
+	for idx in _others_on_tile():
+		var hand: Array = players[idx]["hand"]
+		if not hand.is_empty():
+			found.append(idx)
+	return found
+
+
+func _players_with_cards() -> Array[int]:
+	var found: Array[int] = []
+	for idx in _other_indexes():
+		var hand: Array = players[idx]["hand"]
+		if not hand.is_empty():
+			found.append(idx)
+	return found
+
+
+func _other_has_gold() -> bool:
+	for idx in _other_indexes():
+		if int(players[idx]["gold"]) > 0:
+			return true
+	return false
+
+
+func _aliens_in_areas() -> Array:
+	var found: Array = []
+	for player in players:
+		var who: Dictionary = player
+		var aliens: Array = who["aliens"]
+		for slot in aliens.size():
+			found.append({
+				"id": str(aliens[slot]),
+				"owner": int(who["index"]),
+				"owner_name": str(who["name"]),
+				"slot": slot,
+			})
+	return found
+
+
+func _copyable_aliens() -> Array:
+	var found: Array = []
+	for entry in _aliens_in_areas():
+		var info: Dictionary = entry
+		var alien_id := str(info["id"])
+		if alien_id == "mimix":
+			continue
+		if str(CardData.get_card(alien_id).get("alien_mode", "")) != "active":
+			continue
+		found.append(info)
+	return found
+
+
+func _area_is_active(area_index: int) -> bool:
+	var alien_id := _area_alien(area_index)
+	if alien_id == "":
+		return false
+	return str(CardData.get_card(alien_id).get("alien_mode", "")) == "active"
+
+
+func _area_alien(area_index: int) -> String:
+	if players.is_empty():
+		return ""
+	var aliens: Array = current_player()["aliens"]
+	if area_index < 0 or area_index >= aliens.size():
+		return ""
+	return str(aliens[area_index])
+
+
+func _area_has(player: Dictionary, alien_id: String) -> bool:
+	var aliens: Array = player["aliens"]
+	return alien_id in aliens
+
+
+func _remove_area_alien(player: Dictionary, slot: int, alien_id: String) -> bool:
+	var aliens: Array = player["aliens"]
+	if slot >= 0 and slot < aliens.size() and str(aliens[slot]) == alien_id:
+		aliens.remove_at(slot)
+		return true
+	for i in aliens.size():
+		if str(aliens[i]) == alien_id:
+			aliens.remove_at(i)
+			return true
+	return false
+
+
+func _hand_ids(player: Dictionary) -> Array[String]:
+	var cards: Array[String] = []
+	var hand: Array = player["hand"]
+	for card_id in hand:
+		cards.append(str(card_id))
+	return cards
+
+
+func _reserved_aliens() -> Array[String]:
+	var reserved: Array[String] = []
+	for key in DEBUG_PLAYER_ALIENS.keys():
+		var index := int(key)
+		if index < 0 or index >= players.size():
+			continue
+		var list: Array = DEBUG_PLAYER_ALIENS[key]
+		for alien_id in list:
+			var id := str(alien_id)
+			if CardData.is_alien(id) and id not in reserved:
+				reserved.append(id)
+	return reserved
+
+
+func _place_debug_aliens() -> void:
+	for key in DEBUG_PLAYER_ALIENS.keys():
+		var index := int(key)
+		if index < 0 or index >= players.size():
+			continue
+		var who: Dictionary = players[index]
+		var aliens: Array = who["aliens"]
+		var list: Array = DEBUG_PLAYER_ALIENS[key]
+		for alien_id in list:
+			var id := str(alien_id)
+			if CardData.is_alien(id):
+				aliens.append(id)
+	_check_win()

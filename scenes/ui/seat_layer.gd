@@ -9,6 +9,7 @@ signal interact_pressed
 signal fight_pressed
 signal end_turn_pressed
 signal checklist_pressed
+signal alien_use_pressed(area_index: int)
 
 const SEAT_SCENE := preload("res://scenes/ui/player_seat.tscn")
 const STRIP_SCENE := preload("res://scenes/ui/opponent_strip.tscn")
@@ -73,6 +74,7 @@ func _add_bottom(player: Dictionary, game: GameState, selected_hand_index: int, 
 	seat.connect("fight_pressed", _emit_fight)
 	seat.connect("end_turn_pressed", _emit_end)
 	seat.connect("checklist_pressed", _emit_checklist)
+	seat.connect("alien_use_pressed", _emit_alien_use)
 
 
 func _add_opponent(player: Dictionary, slot: String) -> void:
@@ -144,6 +146,10 @@ func _emit_end() -> void:
 
 func _emit_checklist() -> void:
 	checklist_pressed.emit()
+
+
+func _emit_alien_use(area_index: int) -> void:
+	alien_use_pressed.emit(area_index)
 
 
 func _clear_seats() -> void:

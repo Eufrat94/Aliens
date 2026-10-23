@@ -52,6 +52,7 @@ func _ready() -> void:
 	_seats.fight_pressed.connect(_on_fight)
 	_seats.end_turn_pressed.connect(_on_end_turn)
 	_seats.checklist_pressed.connect(_on_checklist)
+	_seats.alien_use_pressed.connect(_on_alien_use)
 	_board.tile_clicked.connect(_on_tile_clicked)
 	_pass.dismissed.connect(_on_pass_dismissed)
 	_popup.card_picked.connect(_on_popup_card)
@@ -66,6 +67,8 @@ func _ready() -> void:
 	game.turn_ended.connect(_on_turn_ended)
 	game.skrim_announced.connect(_on_skrim)
 	game.game_won.connect(_on_game_won)
+	game.handoff_screen.connect(_on_handoff_screen)
+	game.public_banner.connect(_on_public_banner)
 
 
 func _input(event: InputEvent) -> void:
@@ -91,6 +94,11 @@ func _input(event: InputEvent) -> void:
 		return
 	if not _is_cancel(event):
 		return
+	if game.can_cancel_alien():
+		game.cancel_alien_choice()
+		_clear_selection()
+		get_viewport().set_input_as_handled()
+		return
 	if _gear_replace_index >= 0 or _selected_hand_index >= 0 or _selecting_move:
 		_clear_selection()
 		get_viewport().set_input_as_handled()
@@ -107,7 +115,7 @@ func _on_player_count_chosen(count: int) -> void:
 
 
 func _on_state_changed() -> void:
-	if _pass.visible:
+	if _pass.visible or game.handoff_phase() == "choose":
 		_hud.refresh_log(game)
 		_board.refresh_tokens(game)
 		_board.refresh_decks(game)
@@ -125,10 +133,13 @@ func _refresh_view() -> void:
 		return
 	_hud.refresh_log(game)
 	_seats.refresh(game, _selected_hand_index, _gear_replace_index, _selecting_move)
+	_sync_highlights()
 	_warn_if_popup_missing()
 
 
 func _on_card_clicked(hand_index: int) -> void:
+	if game.is_alien_pending():
+		return
 	_selecting_move = false
 	_board.clear_highlights()
 	_gear_replace_index = -1
@@ -181,6 +192,12 @@ func _on_card_clicked(hand_index: int) -> void:
 
 func _on_tile_clicked(tile_id: String) -> void:
 	if _popup.visible or _market.visible or _pass.visible or _setup.visible or _gear_replace_index >= 0:
+		return
+	var alien_targets := game.alien_tile_targets()
+	if not alien_targets.is_empty():
+		if tile_id not in alien_targets:
+			return
+		game.choose_alien_tile(tile_id)
 		return
 	if _selected_hand_index >= 0:
 		var hand_index := _selected_hand_index
@@ -259,6 +276,18 @@ func _on_turn_ended() -> void:
 
 
 func _on_pass_dismissed() -> void:
+	var phase := game.handoff_phase()
+	if phase == "arrive" or phase == "return":
+		_preview.call("unsuppress")
+		game.handoff_screen_dismissed()
+		if _pass.visible:
+			_preview.call("suppress")
+			return
+		if phase == "return":
+			_refresh_view()
+			_board.refresh_tokens(game)
+			_board.refresh_decks(game)
+		return
 	_preview.call("unsuppress")
 	game.begin_turn()
 	_refresh_view()
@@ -312,6 +341,30 @@ func _close_market() -> void:
 	game.market_finish()
 
 
+func _present_handoff(title: String, hint: String, color: Color) -> void:
+	_hide_preview()
+	_preview.call("suppress")
+	if _popup.visible:
+		_popup.dismiss()
+	if _checklist.visible:
+		_checklist.hide_checklist()
+	_seats.conceal()
+	_pass.call("show_message", title, hint, color)
+
+
+func _sync_highlights() -> void:
+	var targets := game.alien_tile_targets()
+	if not targets.is_empty():
+		_board.set_highlighted_tiles(targets)
+		return
+	if game.is_alien_pending():
+		_board.clear_highlights()
+		return
+	if _selecting_move or _selected_hand_index >= 0:
+		return
+	_board.clear_highlights()
+
+
 func _present_pass() -> void:
 	_hide_preview()
 	_preview.call("suppress")
@@ -335,6 +388,20 @@ func _on_checklist_toggled(alien_id: String, on: bool) -> void:
 
 func _on_skrim(player_name: String) -> void:
 	_skrim.show_for(player_name)
+
+
+func _on_public_banner(headline: String) -> void:
+	_skrim.show_announcement(headline)
+
+
+func _on_handoff_screen(title: String, hint: String, color: Color) -> void:
+	_present_handoff(title, hint, color)
+
+
+func _on_alien_use(area_index: int) -> void:
+	_clear_selection(false)
+	game.use_alien(area_index)
+	_sync_highlights()
 
 
 func _on_game_won(player_index: int) -> void:

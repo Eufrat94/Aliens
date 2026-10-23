@@ -52,10 +52,9 @@ func setup(card_id: String, index: int, playable: bool, faded: bool, selected: b
 	_name_label.text = card["name"]
 	_name_label.offset_right = 82.0 if is_new else 126.0
 	_body_label.text = card["text"]
-	var alien := int(card["kind"]) == CardData.Kind.ALIEN
-	var soon: bool = alien or bool(card.get("soon", false))
+	var soon := bool(card.get("soon", false))
 	_soon_label.visible = soon
-	_soon_label.text = CardData.ALIEN_SOON_TEXT if alien else CardData.SOON_TEXT
+	_soon_label.text = CardData.SOON_TEXT
 	_body_label.offset_bottom = 128.0 if soon else 174.0
 	_new_badge.visible = is_new
 	_apply_kind(card)

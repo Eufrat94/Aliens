@@ -9,6 +9,7 @@ signal interact_pressed
 signal fight_pressed
 signal end_turn_pressed
 signal checklist_pressed
+signal alien_use_pressed(area_index: int)
 
 const MINI_SCENE := preload("res://scenes/ui/mini_card.tscn")
 const CARD_SCENE := preload("res://scenes/ui/card_view.tscn")
@@ -109,10 +110,12 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 	var alien_host := Control.new()
 	alien_host.mouse_filter = MOUSE_FILTER_IGNORE
 	alien_box.add_child(alien_host)
-	for alien_id in aliens:
+	for area_index in aliens.size():
+		var alien_id := str(aliens[area_index])
 		var alien_card: Control = MINI_SCENE.instantiate()
 		alien_host.add_child(alien_card)
-		alien_card.call("setup", str(alien_id))
+		alien_card.call("setup", alien_id)
+		_add_alien_badge(alien_card, area_index, game, alien_id)
 	UiConfig.layout_fan(alien_host, alien_w, UiConfig.MINI_SIZE, row_h - UiConfig.MINI_SIZE.y)
 
 
@@ -219,6 +222,9 @@ func _action_button(title: String, enabled: bool, reason: String, button_h: floa
 
 
 func _instruction_text(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> String:
+	var alien_text := game.alien_hint()
+	if alien_text != "":
+		return alien_text
 	if gear_replace_index >= 0:
 		return "Choose a gear slot to replace (Esc to cancel)"
 	if selected_hand_index >= 0:
@@ -268,6 +274,45 @@ func _fill_hand(host: Control, player: Dictionary, game: GameState, selected_han
 		if selected:
 			card_view.set_meta("fan_raised", true)
 		card_view.card_clicked.connect(_on_card_clicked)
+
+
+func _add_alien_badge(mini: Control, area_index: int, game: GameState, alien_id: String) -> void:
+	var card: Dictionary = CardData.get_card(alien_id)
+	var mode := str(card.get("alien_mode", ""))
+	if mode == "passive":
+		_add_mini_label(mini, "Passive")
+		return
+	if mode != "active":
+		return
+	var used: Array = game.current_player()["aliens_used_this_turn"]
+	if alien_id in used:
+		_add_mini_label(mini, "Used")
+		return
+	var button := Button.new()
+	button.text = game.alien_use_label(alien_id)
+	button.position = Vector2(2, 86)
+	button.size = Vector2(82, 32)
+	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	button.add_theme_font_size_override("font_size", 10)
+	button.disabled = not game.can_use_alien(area_index)
+	var reason := game.alien_use_reason(area_index)
+	if reason != "":
+		button.tooltip_text = reason
+	button.pressed.connect(func() -> void: alien_use_pressed.emit(area_index))
+	mini.add_child(button)
+
+
+func _add_mini_label(mini: Control, text: String) -> void:
+	var label := Label.new()
+	label.text = text
+	label.mouse_filter = MOUSE_FILTER_IGNORE
+	label.position = Vector2(4, 94)
+	label.size = Vector2(78, 22)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_color", Color(0.35, 0.35, 0.4))
+	mini.add_child(label)
 
 
 func _add_use_badge(mini: Control, slot: int, game: GameState, card_id: String) -> void:

@@ -21,11 +21,23 @@ func present(data: Dictionary) -> void:
 	_clear(_card_row)
 	_clear(_button_row)
 	var cards: Array = data["cards"]
+	var captions: Array = data.get("captions", [])
 	var clickable: bool = bool(data["clickable"])
 	for i in cards.size():
 		var card_id := str(cards[i])
+		var wrap := VBoxContainer.new()
+		wrap.alignment = BoxContainer.ALIGNMENT_CENTER
+		wrap.add_theme_constant_override("separation", 4)
+		if i < captions.size():
+			var caption := Label.new()
+			caption.text = str(captions[i])
+			caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			caption.add_theme_font_size_override("font_size", 14)
+			caption.add_theme_color_override("font_color", Color(0.15, 0.12, 0.2))
+			wrap.add_child(caption)
 		var card_view: CardView = CARD_SCENE.instantiate()
-		_card_row.add_child(card_view)
+		wrap.add_child(card_view)
+		_card_row.add_child(wrap)
 		card_view.setup(card_id, i, true, false, false, false, "")
 		if clickable:
 			card_view.card_clicked.connect(_on_card)
