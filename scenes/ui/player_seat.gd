@@ -15,6 +15,13 @@ const MINI_SCENE := preload("res://scenes/ui/mini_card.tscn")
 const CARD_SCENE := preload("res://scenes/ui/card_view.tscn")
 const CLAW_HINT := "Click a highlighted tile to draw from its deck. Right-click or Esc to cancel."
 const MOVE_HINT := "Click a highlighted tile to move there. Right-click or Esc to cancel."
+const ACTION_W := 110.0
+const ACTION_H := 40.0
+const ACTION_GAP := 8.0
+const END_GAP := 50.0
+const END_W := 150.0
+const END_H := 44.0
+const ACTION_SCREEN_X := 650.0
 
 var _instruction: Label
 
@@ -31,29 +38,26 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 	_instruction = null
 	_apply_chrome(player["color"])
 	var inset := 12.0
-	var header_h := 36.0
-	var header := _build_header(player, game, selected_hand_index, gear_replace_index, selecting_move)
-	header.position = Vector2(inset, 8)
-	header.size = Vector2(size.x - inset * 2.0, header_h)
+	var header_h := 48.0
+	var header_w := size.x - inset * 2.0
+	var header := _build_header(player, game, selected_hand_index, gear_replace_index, selecting_move, header_w, header_h)
+	header.position = Vector2(inset, 6)
+	header.size = Vector2(header_w, header_h)
 	add_child(header)
 
-	var row_top := 8.0 + header_h + 4.0
-	var row_h := size.y - row_top - 10.0
+	var row_top := 6.0 + header_h + 4.0
+	var row_h := size.y - row_top - 8.0
 	var gap := 14.0
-	var action_w := 168.0
 	var gear_w := UiConfig.MINI_SIZE.x * float(GameState.GEAR_SLOTS) + 12.0
 	var alien_w := 210.0
 	var inner_w := size.x - inset * 2.0
-	var hand_w := inner_w - action_w - gear_w - alien_w - gap * 3.0
-	var hand_x := inset + action_w + gap
+	var hand_w := inner_w - gear_w - alien_w - gap * 2.0
+	var hand_x := inset
 	var gear_x := hand_x + hand_w + gap
 	var alien_x := gear_x + gear_w + gap
 
-	var actions := _build_actions(game, row_h)
-	actions.position = Vector2(inset, row_top)
-	add_child(actions)
-
 	var hand := Control.new()
+	hand.name = "Hand"
 	hand.mouse_filter = MOUSE_FILTER_IGNORE
 	hand.position = Vector2(hand_x, row_top)
 	add_child(hand)
@@ -120,8 +124,7 @@ func show_player(player: Dictionary, game: GameState, selected_hand_index: int, 
 
 
 func set_instruction(text: String) -> void:
-	if _instruction != null:
-		_instruction.text = text
+	_apply_instruction(text)
 
 
 func _apply_chrome(color: Color) -> void:
@@ -133,10 +136,22 @@ func _apply_chrome(color: Color) -> void:
 	add_theme_stylebox_override("panel", style)
 
 
-func _build_header(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
+func _build_header(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool, header_w: float, header_h: float) -> Control:
+	var header := Control.new()
+	header.name = "Header"
+	header.mouse_filter = MOUSE_FILTER_PASS
+
+	var action_local_x := ACTION_SCREEN_X - position.x - 12.0
+	var action_w := ACTION_W * 4.0 + ACTION_GAP * 3.0
+	var left := HBoxContainer.new()
+	left.name = "Status"
+	left.mouse_filter = MOUSE_FILTER_PASS
+	left.clip_contents = true
+	left.add_theme_constant_override("separation", 10)
+	left.alignment = BoxContainer.ALIGNMENT_CENTER
+	left.position = Vector2.ZERO
+	left.size = Vector2(maxf(action_local_x - 16.0, 0.0), header_h)
+	header.add_child(left)
 
 	var turn := Label.new()
 	turn.text = "%s's turn" % str(player["name"])
@@ -146,7 +161,7 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 	var bold := SystemFont.new()
 	bold.font_weight = 700
 	turn.add_theme_font_override("font", bold)
-	row.add_child(turn)
+	left.add_child(turn)
 
 	var pips := HBoxContainer.new()
 	pips.add_theme_constant_override("separation", 4)
@@ -157,7 +172,7 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 		pip.size_flags_vertical = SIZE_SHRINK_CENTER
 		pip.mouse_filter = MOUSE_FILTER_IGNORE
 		pips.add_child(pip)
-	row.add_child(pips)
+	left.add_child(pips)
 	_paint_pips(pips, game.actions_left)
 
 	var actions := Label.new()
@@ -165,60 +180,105 @@ func _build_header(player: Dictionary, game: GameState, selected_hand_index: int
 	actions.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	actions.add_theme_color_override("font_color", Color(0.94, 0.94, 0.97))
 	actions.add_theme_font_size_override("font_size", 16)
-	row.add_child(actions)
+	left.add_child(actions)
 
-	row.add_child(UiConfig.circle_token(UiConfig.GOLD, int(player["gold"]), Color(0.12, 0.09, 0.02)))
-	row.add_child(UiConfig.circle_token(UiConfig.PURPLE, int(player["purple"]), Color.WHITE))
+	left.add_child(UiConfig.circle_token(UiConfig.GOLD, int(player["gold"]), Color(0.12, 0.09, 0.02)))
+	left.add_child(UiConfig.circle_token(UiConfig.PURPLE, int(player["purple"]), Color.WHITE))
 	if _has_skrim(player):
-		row.add_child(_skrim_badge())
+		left.add_child(_skrim_badge())
 
 	_instruction = Label.new()
+	_instruction.name = "Instruction"
 	_instruction.size_flags_horizontal = SIZE_EXPAND_FILL
 	_instruction.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_instruction.clip_text = true
 	_instruction.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_instruction.add_theme_color_override("font_color", Color(0.9, 0.9, 0.95))
 	_instruction.add_theme_font_size_override("font_size", 15)
-	_instruction.text = _instruction_text(player, game, selected_hand_index, gear_replace_index, selecting_move)
-	row.add_child(_instruction)
+	left.add_child(_instruction)
+	_apply_instruction(_instruction_text(player, game, selected_hand_index, gear_replace_index, selecting_move))
+
+	var action_bar := _build_actions(game)
+	action_bar.position = Vector2(action_local_x, (header_h - ACTION_H) * 0.5)
+	header.add_child(action_bar)
+
+	var end_turn := _end_turn_button(player["color"])
+	end_turn.position = Vector2(action_local_x + action_w + END_GAP, (header_h - END_H) * 0.5)
+	header.add_child(end_turn)
 
 	var aliens_button := Button.new()
+	aliens_button.name = "AliensButton"
 	aliens_button.text = "Aliens"
 	aliens_button.custom_minimum_size = Vector2(90, 32)
+	aliens_button.size = Vector2(90, 32)
+	aliens_button.position = Vector2(header_w - 90.0, (header_h - 32.0) * 0.5)
 	aliens_button.pressed.connect(func() -> void: checklist_pressed.emit())
-	row.add_child(aliens_button)
+	header.add_child(aliens_button)
+	return header
 
-	var end_turn := Button.new()
-	end_turn.text = "End turn"
-	end_turn.custom_minimum_size = Vector2(120, 32)
-	end_turn.pressed.connect(func() -> void: end_turn_pressed.emit())
-	row.add_child(end_turn)
+
+func _apply_instruction(text: String) -> void:
+	if _instruction == null:
+		return
+	_instruction.text = text
+	_instruction.tooltip_text = text
+
+
+func _build_actions(game: GameState) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "ActionBar"
+	row.mouse_filter = MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", int(ACTION_GAP))
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_child(_action_button("Move", game.can_move(), game.move_reason(), move_pressed))
+	row.add_child(_action_button("Search", game.can_search(), game.search_reason(), search_pressed))
+	row.add_child(_action_button("Interact", game.can_interact(), game.interact_reason(), interact_pressed))
+	row.add_child(_action_button("Fight", game.can_fight(), game.fight_reason(), fight_pressed))
 	return row
 
 
-func _build_actions(game: GameState, row_h: float) -> GridContainer:
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.mouse_filter = MOUSE_FILTER_IGNORE
-	grid.add_theme_constant_override("h_separation", 6)
-	grid.add_theme_constant_override("v_separation", 6)
-	var button_h := (row_h - 6.0) * 0.5
-	grid.add_child(_action_button("Move", game.can_move(), game.move_reason(), button_h, move_pressed))
-	grid.add_child(_action_button("Search", game.can_search(), game.search_reason(), button_h, search_pressed))
-	grid.add_child(_action_button("Interact", game.can_interact(), game.interact_reason(), button_h, interact_pressed))
-	grid.add_child(_action_button("Fight", game.can_fight(), game.fight_reason(), button_h, fight_pressed))
-	return grid
-
-
-func _action_button(title: String, enabled: bool, reason: String, button_h: float, pressed_signal: Signal) -> Button:
+func _action_button(title: String, enabled: bool, reason: String, pressed_signal: Signal) -> Button:
 	var button := Button.new()
+	button.name = title + "Button"
 	button.text = title
-	button.custom_minimum_size = Vector2(78, button_h)
+	button.custom_minimum_size = Vector2(ACTION_W, ACTION_H)
+	button.size = Vector2(ACTION_W, ACTION_H)
 	button.disabled = not enabled
 	if not enabled and reason != "":
 		button.tooltip_text = reason
 	button.pressed.connect(func() -> void: pressed_signal.emit())
 	return button
+
+
+func _end_turn_button(color: Color) -> Button:
+	var button := Button.new()
+	button.name = "EndTurn"
+	button.text = "End turn"
+	button.custom_minimum_size = Vector2(END_W, END_H)
+	button.size = Vector2(END_W, END_H)
+	button.add_theme_color_override("font_color", Color(0.12, 0.1, 0.16))
+	button.add_theme_font_size_override("font_size", 18)
+	var normal := _pill_style(Color(0.93, 0.93, 0.96), color)
+	var hover := _pill_style(Color(1, 1, 1), color)
+	var pressed := _pill_style(color.lerp(Color(0.9, 0.9, 0.93), 0.72), color)
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", hover)
+	button.add_theme_stylebox_override("pressed", pressed)
+	button.add_theme_stylebox_override("focus", hover)
+	button.add_theme_stylebox_override("disabled", _pill_style(Color(0.75, 0.75, 0.8), color))
+	button.pressed.connect(func() -> void: end_turn_pressed.emit())
+	return button
+
+
+func _pill_style(fill: Color, border: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = fill
+	style.border_color = border
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(int(END_H * 0.5))
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	return style
 
 
 func _instruction_text(player: Dictionary, game: GameState, selected_hand_index: int, gear_replace_index: int, selecting_move: bool) -> String:
