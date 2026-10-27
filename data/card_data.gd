@@ -452,9 +452,17 @@ static func recipe_of(card_id: String) -> Array[String]:
 
 
 static func recipe_line(card: Dictionary) -> String:
+	return " · ".join(_recipe_names(card))
+
+
+static func recipe_block(card: Dictionary) -> String:
+	return "\n".join(_recipe_names(card))
+
+
+static func _recipe_names(card: Dictionary) -> PackedStringArray:
+	var names := PackedStringArray()
 	if not bool(card.get("invention", false)):
-		return ""
-	var names: PackedStringArray = PackedStringArray()
+		return names
 	var raw: Array = card.get("recipe", [])
 	for part in raw:
 		var part_id := str(part)
@@ -462,7 +470,7 @@ static func recipe_line(card: Dictionary) -> String:
 			names.append("Any")
 		else:
 			names.append(str(CARDS[part_id]["name"]))
-	return " · ".join(names)
+	return names
 
 
 static func card_body(card: Dictionary) -> String:

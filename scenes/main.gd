@@ -519,15 +519,26 @@ func _place_legend(_board_top_left: Vector2, _scaled: Vector2) -> void:
 	var legend := _seats.get_node("Legend") as Control
 	var crystal: Rect2 = _board.tile_rect("crystal_mount")
 	var lake: Rect2 = _board.tile_rect("lake")
-	var width := 124.0
-	var height := 86.0
-	var gap := lake.position.x - crystal.end.x
-	var x := crystal.end.x + (gap - width) * 0.5
-	var y := crystal.position.y + 4.0
-	legend.position = Vector2(x, y)
-	legend.size = Vector2(width, height)
-	_hud.place_discard(crystal, lake, Rect2(legend.position, legend.size))
-	_hud.place_workshop(_board.tile_rect("workshop"), _board.tile_rect("village_market"))
+	var spaceship: Rect2 = _board.tile_rect("spaceship")
+	var village: Rect2 = _board.tile_rect("village_market")
+	_hud.place_workshop(crystal, lake, village)
+	var legend_size := Vector2(124.0, 86.0)
+	var discard_size := Vector2(148.0, lake.size.y)
+	var pair_gap := 10.0
+	var pair_w := discard_size.x + pair_gap + legend_size.x
+	var scale := lake.size.y / 150.0
+	var path_bottom := lake.position.y + lake.size.y * 0.5 + 7.0 * scale
+	var y := path_bottom + 8.0
+	var pair_h := maxf(discard_size.y, legend_size.y)
+	var bottom_limit := UiConfig.BOARD_REGION.end.y - 4.0
+	if y + pair_h > bottom_limit:
+		y = bottom_limit - pair_h
+	var gap_left := lake.end.x + 8.0
+	var gap_right := spaceship.position.x - 8.0
+	var x := gap_left + (gap_right - gap_left - pair_w) * 0.5
+	legend.position = Vector2(x + discard_size.x + pair_gap, y)
+	legend.size = legend_size
+	_hud.place_discard_at(Vector2(x, y), discard_size)
 
 
 func _toggle_fullscreen() -> void:

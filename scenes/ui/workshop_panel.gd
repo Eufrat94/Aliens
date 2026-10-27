@@ -105,9 +105,6 @@ func _fill_row() -> void:
 		column.add_child(card_view)
 		card_view.setup(card_id, slot, true, false, false, false, "")
 		card_view.allow_hover_only()
-		if bool(CardData.get_card(card_id).get("invention", false)):
-			var body := card_view.get_node("BodyLabel") as Label
-			body.add_theme_font_size_override("font_size", 11)
 		for mark in _game.recipe_marks(slot):
 			var info: Dictionary = mark
 			var line := Label.new()
