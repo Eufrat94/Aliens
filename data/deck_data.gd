@@ -8,26 +8,22 @@ const DECKS := {
 		"grappling_claw": 2,
 		"junk_radio": 2,
 		"alien_tracker": 2,
-		"scrap_metal": 2,
 	},
 	"archeology_site": {
 		"obsidian_machete": 2,
 		"ancient_trowel": 2,
 		"scholars_notebook": 2,
 		"map": 2,
-		"relic_shard": 4,
 	},
 	"lake": {
 		"reed_raft": 2,
 		"fishing_net": 2,
 		"lucky_lure": 2,
-		"river_pearl": 6,
 	},
 	"spaceship": {
 		"patchwork_glider": 2,
 		"cargo_manifest": 2,
 		"passenger_club_card": 2,
-		"copper_wire": 6,
 	},
 }
 
@@ -43,4 +39,6 @@ static func build_deck(tile_id: String) -> Array[String]:
 		var copies: int = int(counts[card_id])
 		for _copy in copies:
 			deck.append(card_id)
+	for material_id in CardData.RESOURCE_IDS:
+		deck.append(material_id)
 	return deck

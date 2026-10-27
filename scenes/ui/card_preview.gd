@@ -59,8 +59,7 @@ func _show_pending() -> void:
 	_strip.color = strip["color"]
 	_strip_label.text = str(strip["title"])
 	_strip_label.add_theme_color_override("font_color", strip["title_color"])
-	var body := str(card["text"])
-	_body_label.text = body
+	_body_label.text = CardData.card_body(card)
 	var tag := CardView.action_tag(card)
 	_tag_label.visible = tag != ""
 	_tag_label.text = tag

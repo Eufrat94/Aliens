@@ -230,7 +230,12 @@ func _build_actions(game: GameState) -> HBoxContainer:
 	row.mouse_filter = MOUSE_FILTER_IGNORE
 	row.add_theme_constant_override("separation", int(ACTION_GAP))
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_child(_action_button("Move", game.can_move(), game.move_reason(), move_pressed))
+	var move := _action_button("Move", game.can_move(), game.move_reason(), move_pressed)
+	move.text = game.move_button_text()
+	move.add_theme_font_size_override("font_size", 15)
+	if game.can_move() and game.move_button_tip() != "":
+		move.tooltip_text = game.move_button_tip()
+	row.add_child(move)
 	row.add_child(_action_button("Search", game.can_search(), game.search_reason(), search_pressed))
 	row.add_child(_action_button("Interact", game.can_interact(), game.interact_reason(), interact_pressed))
 	row.add_child(_action_button("Fight", game.can_fight(), game.fight_reason(), fight_pressed))

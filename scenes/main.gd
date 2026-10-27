@@ -14,6 +14,8 @@ var _selecting_move := false
 @onready var _market: Control = $PopupLayer/MarketPanel
 @onready var _preview: Control = $PreviewLayer/CardPreview
 
+var _workshop: Control
+
 var _checklist: AlienChecklist
 var _skrim: SkrimBanner
 var _win: WinScreen
@@ -61,6 +63,10 @@ func _ready() -> void:
 	_market.sell_pressed.connect(_on_market_sell)
 	_market.closed.connect(_on_market_closed)
 	_market.visible = false
+	_workshop = preload("res://scenes/ui/workshop_panel.gd").new()
+	$PopupLayer.add_child(_workshop)
+	_workshop.connect("closed", _close_workshop)
+	_workshop.visible = false
 	game.state_changed.connect(_on_state_changed)
 	game.prompt_opened.connect(_on_prompt_opened)
 	game.prompt_closed.connect(_on_prompt_closed)
@@ -75,6 +81,11 @@ func _input(event: InputEvent) -> void:
 	if _is_fullscreen_toggle(event):
 		_toggle_fullscreen()
 		get_viewport().set_input_as_handled()
+		return
+	if _workshop != null and _workshop.visible:
+		if _is_cancel(event):
+			_close_workshop()
+			get_viewport().set_input_as_handled()
 		return
 	if _market.visible:
 		if _is_cancel(event):
@@ -126,6 +137,8 @@ func _on_state_changed() -> void:
 	_board.refresh_decks(game)
 	if _market.visible:
 		_market.refresh(game)
+	if _workshop != null and _workshop.visible:
+		_workshop.call("refresh", game)
 
 
 func _refresh_view() -> void:
@@ -191,7 +204,7 @@ func _on_card_clicked(hand_index: int) -> void:
 
 
 func _on_tile_clicked(tile_id: String) -> void:
-	if _popup.visible or _market.visible or _pass.visible or _setup.visible or _gear_replace_index >= 0:
+	if _popup.visible or _market.visible or (_workshop != null and _workshop.visible) or _pass.visible or _setup.visible or _gear_replace_index >= 0:
 		return
 	var alien_targets := game.alien_tile_targets()
 	if not alien_targets.is_empty():
@@ -254,9 +267,13 @@ func _on_search() -> void:
 
 func _on_interact() -> void:
 	_clear_selection(false)
-	if game.do_interact() and not game.market_visit.is_empty():
-		_hide_preview()
+	if not game.do_interact():
+		return
+	_hide_preview()
+	if not game.market_visit.is_empty():
 		_market.present(game)
+	elif not game.workshop_visit.is_empty():
+		_workshop.call("present", game)
 
 
 func _on_fight() -> void:
@@ -264,7 +281,7 @@ func _on_fight() -> void:
 
 
 func _on_end_turn() -> void:
-	if not game.market_visit.is_empty():
+	if not game.market_visit.is_empty() or not game.workshop_visit.is_empty():
 		return
 	_clear_selection(false)
 	game.end_turn()
@@ -339,6 +356,13 @@ func _on_market_closed() -> void:
 func _close_market() -> void:
 	_market.dismiss()
 	game.market_finish()
+
+
+func _close_workshop() -> void:
+	if _workshop == null:
+		return
+	_workshop.call("dismiss")
+	game.workshop_finish()
 
 
 func _present_handoff(title: String, hint: String, color: Color) -> void:
@@ -421,6 +445,8 @@ func _on_new_game() -> void:
 		_popup.dismiss()
 	if _market.visible:
 		_market.dismiss()
+	if _workshop != null and _workshop.visible:
+		_workshop.call("dismiss")
 	_pass.visible = false
 	_preview.call("unsuppress")
 	_seats.conceal()
@@ -436,8 +462,9 @@ func _hide_preview() -> void:
 func _warn_if_popup_missing() -> void:
 	if game.players.is_empty() or _pass.visible or _setup.visible:
 		return
-	var waiting := not game.prompt.is_empty() or not game.market_visit.is_empty()
-	var showing := _popup.visible or _market.visible
+	var waiting := not game.prompt.is_empty() or not game.market_visit.is_empty() or not game.workshop_visit.is_empty()
+	var workshop_open := _workshop != null and _workshop.visible
+	var showing := _popup.visible or _market.visible or workshop_open
 	if waiting and not showing:
 		print("Warning: the game is waiting on a popup, but none is visible.")
 	if game.actions_left <= 0 or waiting or showing:
@@ -500,6 +527,7 @@ func _place_legend(_board_top_left: Vector2, _scaled: Vector2) -> void:
 	legend.position = Vector2(x, y)
 	legend.size = Vector2(width, height)
 	_hud.place_discard(crystal, lake, Rect2(legend.position, legend.size))
+	_hud.place_workshop(_board.tile_rect("workshop"), _board.tile_rect("village_market"))
 
 
 func _toggle_fullscreen() -> void:

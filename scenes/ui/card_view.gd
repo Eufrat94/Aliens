@@ -51,7 +51,7 @@ func setup(card_id: String, index: int, playable: bool, faded: bool, selected: b
 	var card: Dictionary = CardData.get_card(card_id)
 	_name_label.text = card["name"]
 	_name_label.offset_right = 82.0 if is_new else 126.0
-	_body_label.text = card["text"]
+	_body_label.text = CardData.card_body(card)
 	var soon := bool(card.get("soon", false))
 	_soon_label.visible = soon
 	_soon_label.text = CardData.SOON_TEXT
@@ -104,6 +104,12 @@ func _preview_call(method: String, card_id: String) -> void:
 
 static func strip_for(card: Dictionary) -> Dictionary:
 	var kind := int(card["kind"])
+	if bool(card.get("invention", false)):
+		return {
+			"color": Color8(31, 122, 140),
+			"title": "INVENTION",
+			"title_color": Color.WHITE,
+		}
 	if kind == CardData.Kind.GEAR:
 		var active := str(card.get("gear_mode", "")) == "active"
 		return {
@@ -116,7 +122,7 @@ static func strip_for(card: Dictionary) -> Dictionary:
 	if kind == CardData.Kind.RESOURCE:
 		return {
 			"color": Color8(212, 172, 13),
-			"title": "RESOURCE",
+			"title": "MATERIAL",
 			"title_color": Color(0.12, 0.09, 0.02),
 		}
 	if kind == CardData.Kind.ALIEN:

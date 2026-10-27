@@ -2,7 +2,7 @@ class_name BoardData
 extends RefCounted
 
 enum PathType { NORMAL, JUNGLE, RIVER, PLANE }
-enum TileType { SEARCH, HUB, BLACK_MARKET, PURPLE_SOURCE, ORACLE, UNASSIGNED }
+enum TileType { SEARCH, HUB, BLACK_MARKET, PURPLE_SOURCE, ORACLE, UNASSIGNED, WORKSHOP }
 
 const TILES := {
 	"archeology_site": {
@@ -20,10 +20,10 @@ const TILES := {
 		"grid_pos": Vector2i(2, 0),
 		"type": TileType.ORACLE,
 	},
-	"arena": {
-		"name": "Arena",
+	"workshop": {
+		"name": "Workshop",
 		"grid_pos": Vector2i(0, 1),
-		"type": TileType.UNASSIGNED,
+		"type": TileType.WORKSHOP,
 	},
 	"village_market": {
 		"name": "Village market",
@@ -55,12 +55,12 @@ const TILES := {
 const CONNECTIONS: Array[Dictionary] = [
 	{"a": "archeology_site", "b": "junkyard", "path": PathType.NORMAL},
 	{"a": "junkyard", "b": "village_market", "path": PathType.NORMAL},
-	{"a": "arena", "b": "village_market", "path": PathType.NORMAL},
+	{"a": "workshop", "b": "village_market", "path": PathType.NORMAL},
 	{"a": "village_market", "b": "bandit_camp", "path": PathType.NORMAL},
 	{"a": "village_market", "b": "lake", "path": PathType.NORMAL},
 	{"a": "lake", "b": "spaceship", "path": PathType.NORMAL},
-	{"a": "archeology_site", "b": "arena", "path": PathType.JUNGLE},
-	{"a": "arena", "b": "crystal_mount", "path": PathType.JUNGLE},
+	{"a": "archeology_site", "b": "workshop", "path": PathType.JUNGLE},
+	{"a": "workshop", "b": "crystal_mount", "path": PathType.JUNGLE},
 	{"a": "junkyard", "b": "sacred_altar", "path": PathType.JUNGLE},
 	{"a": "bandit_camp", "b": "spaceship", "path": PathType.JUNGLE},
 	{"a": "archeology_site", "b": "lake", "path": PathType.RIVER},
@@ -105,7 +105,7 @@ static func grid_adjacent(tile_id: String) -> Array[String]:
 
 
 static func has_interaction(tile_id: String) -> bool:
-	return tile_id == "village_market" or tile_id == "crystal_mount"
+	return tile_id == "village_market" or tile_id == "crystal_mount" or tile_id == "workshop"
 
 
 static func path_type_name(path: PathType) -> String:

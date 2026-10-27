@@ -123,37 +123,107 @@ const CARDS := {
 		"action": ActionType.SEARCH,
 		"text": "Look at the top 3 cards of any deck and put them back in the same order. If you saw an alien, gain 1 purple.",
 	},
-	"scrap_metal": {
-		"id": "scrap_metal",
-		"name": "Scrap Metal",
-		"kind": Kind.RESOURCE,
-		"action": ActionType.NONE,
-		"text": "Resource. Sell at a market.",
-		"sell_value": 1,
-	},
-	"relic_shard": {
-		"id": "relic_shard",
-		"name": "Relic Shard",
-		"kind": Kind.RESOURCE,
-		"action": ActionType.NONE,
-		"text": "Resource. Sell at a market.",
-		"sell_value": 2,
-	},
-	"river_pearl": {
-		"id": "river_pearl",
-		"name": "River Pearl",
-		"kind": Kind.RESOURCE,
-		"action": ActionType.NONE,
-		"text": "Resource. Sell at a market.",
-		"sell_value": 2,
-	},
 	"copper_wire": {
 		"id": "copper_wire",
 		"name": "Copper Wire",
 		"kind": Kind.RESOURCE,
 		"action": ActionType.NONE,
-		"text": "Resource. Sell at a market.",
-		"sell_value": 1,
+		"text": "Material. Build inventions at the Workshop, or sell for 1 gold.",
+	},
+	"battery": {
+		"id": "battery",
+		"name": "Battery",
+		"kind": Kind.RESOURCE,
+		"action": ActionType.NONE,
+		"text": "Material. Build inventions at the Workshop, or sell for 1 gold.",
+	},
+	"rope": {
+		"id": "rope",
+		"name": "Rope",
+		"kind": Kind.RESOURCE,
+		"action": ActionType.NONE,
+		"text": "Material. Build inventions at the Workshop, or sell for 1 gold.",
+	},
+	"scrap_plate": {
+		"id": "scrap_plate",
+		"name": "Scrap Plate",
+		"kind": Kind.RESOURCE,
+		"action": ActionType.NONE,
+		"text": "Material. Build inventions at the Workshop, or sell for 1 gold.",
+	},
+	"cog": {
+		"id": "cog",
+		"name": "Cog",
+		"kind": Kind.RESOURCE,
+		"action": ActionType.NONE,
+		"text": "Material. Build inventions at the Workshop, or sell for 1 gold.",
+	},
+	"relic_crystal": {
+		"id": "relic_crystal",
+		"name": "Relic Crystal",
+		"kind": Kind.RESOURCE,
+		"action": ActionType.NONE,
+		"text": "Material. Build inventions at the Workshop, or sell for 1 gold.",
+	},
+	"echo_antenna": {
+		"id": "echo_antenna",
+		"name": "Echo Antenna",
+		"kind": Kind.GEAR,
+		"action": ActionType.NONE,
+		"gear_mode": "passive",
+		"invention": true,
+		"recipe": ["copper_wire", "battery", "relic_crystal"],
+		"text": "Whenever another player uses an alien ability, you gain 1 purple.",
+	},
+	"brass_binoculars": {
+		"id": "brass_binoculars",
+		"name": "Brass Binoculars",
+		"kind": Kind.GEAR,
+		"action": ActionType.NONE,
+		"gear_mode": "passive",
+		"invention": true,
+		"recipe": ["relic_crystal", "any"],
+		"text": "Whenever another player on your tile draws a card from a deck, they must show it to you.",
+	},
+	"pedal_cart": {
+		"id": "pedal_cart",
+		"name": "Pedal Cart",
+		"kind": Kind.GEAR,
+		"action": ActionType.NONE,
+		"gear_mode": "passive",
+		"invention": true,
+		"recipe": ["cog", "cog", "rope"],
+		"text": "At the start of your turn, you may Move once for free (before doing anything else).",
+	},
+	"strongbox": {
+		"id": "strongbox",
+		"name": "Strongbox",
+		"kind": Kind.GEAR,
+		"action": ActionType.NONE,
+		"gear_mode": "passive",
+		"invention": true,
+		"recipe": ["scrap_plate", "scrap_plate", "battery"],
+		"text": "Other players can't take cards from your hand.",
+	},
+	"aether_still": {
+		"id": "aether_still",
+		"name": "Aether Still",
+		"kind": Kind.GEAR,
+		"action": ActionType.NONE,
+		"gear_mode": "active",
+		"invention": true,
+		"recipe": ["copper_wire", "battery", "rope"],
+		"text": "Use (1 action, once per turn): pay 2 gold, gain 1 purple.",
+	},
+	"truth_lantern": {
+		"id": "truth_lantern",
+		"name": "Truth Lantern",
+		"kind": Kind.GEAR,
+		"action": ActionType.NONE,
+		"gear_mode": "active",
+		"invention": true,
+		"recipe": ["relic_crystal", "copper_wire", "rope"],
+		"text": "Use (1 action, once per turn): a player on your tile shows you 1 card from their hand. If they have an alien in hand, they must show an alien; otherwise any card they choose.",
 	},
 	"wingo": {
 		"id": "wingo",
@@ -285,7 +355,8 @@ const CARDS := {
 	},
 }
 
-const RESOURCE_IDS: Array[String] = ["scrap_metal", "relic_shard", "river_pearl", "copper_wire"]
+const RESOURCE_IDS: Array[String] = ["copper_wire", "battery", "rope", "scrap_plate", "cog", "relic_crystal"]
+const INVENTION_IDS: Array[String] = ["echo_antenna", "brass_binoculars", "pedal_cart", "strongbox", "aether_still", "truth_lantern"]
 
 
 static func get_card(id: String) -> Dictionary:
@@ -316,6 +387,8 @@ static func random_starting_hand(count: int = 2) -> Array[String]:
 static func market_pool() -> Array[String]:
 	var ids: Array[String] = []
 	for card_id in CARDS:
+		if bool(CARDS[card_id].get("invention", false)):
+			continue
 		var kind := int(CARDS[card_id]["kind"])
 		if kind == Kind.GEAR or kind == Kind.ABILITY:
 			ids.append(card_id)
@@ -353,3 +426,48 @@ static func alien_mode_label(card: Dictionary) -> String:
 
 static func is_resource(card_id: String) -> bool:
 	return int(get_card(card_id)["kind"]) == Kind.RESOURCE
+
+
+static func is_invention(card_id: String) -> bool:
+	if not CARDS.has(card_id):
+		return false
+	return bool(CARDS[card_id].get("invention", false))
+
+
+static func invention_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for card_id in INVENTION_IDS:
+		ids.append(card_id)
+	return ids
+
+
+static func recipe_of(card_id: String) -> Array[String]:
+	var recipe: Array[String] = []
+	if not CARDS.has(card_id):
+		return recipe
+	var raw: Array = CARDS[card_id].get("recipe", [])
+	for part in raw:
+		recipe.append(str(part))
+	return recipe
+
+
+static func recipe_line(card: Dictionary) -> String:
+	if not bool(card.get("invention", false)):
+		return ""
+	var names: PackedStringArray = PackedStringArray()
+	var raw: Array = card.get("recipe", [])
+	for part in raw:
+		var part_id := str(part)
+		if part_id == "any":
+			names.append("Any")
+		else:
+			names.append(str(CARDS[part_id]["name"]))
+	return " · ".join(names)
+
+
+static func card_body(card: Dictionary) -> String:
+	var recipe := recipe_line(card)
+	var text := str(card["text"])
+	if recipe == "":
+		return text
+	return "%s\n%s" % [recipe, text]

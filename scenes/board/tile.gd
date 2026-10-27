@@ -92,4 +92,6 @@ func _type_name(type: BoardData.TileType) -> String:
 			return "oracle"
 		BoardData.TileType.UNASSIGNED:
 			return "unassigned"
+		BoardData.TileType.WORKSHOP:
+			return "workshop"
 	return "unknown"

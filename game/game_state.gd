@@ -17,6 +17,8 @@ const DEBUG_GIVE_ALL_ITEMS := false
 const DEBUG_START_ALIENS := 0
 const DEBUG_PLAYER_ALIENS: Dictionary = {}
 const DEBUG_START_PURPLE := 0
+const DEBUG_START_MATERIALS := 0
+const DEBUG_PLAYER_GEAR: Dictionary = {}
 const ALIENS_TO_WIN := 5
 const NERFOIL_HAND_LIMIT := 7
 const STARTING_GOLD := 5
@@ -51,6 +53,10 @@ var found_card_ids: Array[String] = []
 var public_log: Array[String] = []
 var prompt: Dictionary = {}
 var market_visit: Dictionary = {}
+var workshop_visit: Dictionary = {}
+var invention_deck: Array[String] = []
+var blueprint_row: Array[String] = ["", "", ""]
+var pedal_free := false
 var missing_alien := ""
 var crystal_pool := 0
 var game_over := false
@@ -64,6 +70,10 @@ var _after_gains := ""
 var _finish_message := ""
 var _follow: Dictionary = {}
 var _passenger: Dictionary = {}
+var _draw_batch: Array[String] = []
+var _binocular_queue: Array = []
+var _binocular_cards: Array[String] = []
+var _binocular_drawer := ""
 
 
 func start_game(player_count: int) -> void:
@@ -72,7 +82,7 @@ func start_game(player_count: int) -> void:
 		return
 	players = []
 	for i in player_count:
-		var hand: Array[String] = CardData.random_starting_hand(STARTING_RESOURCES)
+		var hand: Array[String] = CardData.random_starting_hand(STARTING_RESOURCES + DEBUG_START_MATERIALS)
 		if DEBUG_GIVE_ALL_ITEMS:
 			for item_id in CardData.item_ids():
 				hand.append(item_id)
@@ -97,6 +107,7 @@ func start_game(player_count: int) -> void:
 		var deck: Array[String] = DeckData.build_deck(tile_id)
 		decks[tile_id] = deck
 	discard = []
+	_deal_inventions()
 	crystal_pool = 0
 	game_over = false
 	winner_index = -1
@@ -109,6 +120,12 @@ func start_game(player_count: int) -> void:
 	public_log.clear()
 	prompt = {}
 	market_visit = {}
+	workshop_visit = {}
+	pedal_free = false
+	_draw_batch = []
+	_binocular_queue = []
+	_binocular_cards = []
+	_binocular_drawer = ""
 	_pending_end = false
 	alien_choice = {}
 	_handoff = {}
@@ -119,6 +136,8 @@ func start_game(player_count: int) -> void:
 	_follow = {}
 	_passenger = {}
 	_give_debug_aliens()
+	_give_debug_gear()
+	_refresh_pedal()
 	state_changed.emit()
 
 
@@ -164,10 +183,25 @@ func can_move() -> bool:
 	return move_reason() == ""
 
 
+func move_button_text() -> String:
+	if pedal_free:
+		return "Move (free)"
+	return "Move"
+
+
+func move_button_tip() -> String:
+	if pedal_free:
+		return "Pedal Cart: free move at the start of your turn"
+	return ""
+
+
 func move_reason() -> String:
-	var blocked := _turn_block()
-	if blocked != "":
-		return blocked
+	if game_over:
+		return "The game is over"
+	if _is_busy():
+		return "Finish the current choice first"
+	if not pedal_free and actions_left <= 0:
+		return "No actions left"
 	if get_move_destinations().is_empty():
 		return "Nowhere to move"
 	return ""
@@ -183,8 +217,11 @@ func do_move(destination: String) -> bool:
 	if destination not in get_move_destinations():
 		print("Refused: can't reach that tile")
 		return false
+	var free := pedal_free
 	_move_to(current_player(), destination)
-	actions_left -= 1
+	if not free:
+		actions_left -= 1
+	pedal_free = false
 	state_changed.emit()
 	return true
 
@@ -207,6 +244,7 @@ func do_search() -> bool:
 	if not can_search():
 		print("Refused: %s" % search_reason())
 		return false
+	_end_pedal()
 	if _lure_applies():
 		_ask_lure("base", -1, "", str(current_player()["tile"]), -1)
 		return true
@@ -238,8 +276,13 @@ func do_interact() -> bool:
 	if not can_interact():
 		print("Refused: %s" % interact_reason())
 		return false
-	if str(current_player()["tile"]) == "crystal_mount":
+	var tile_id := str(current_player()["tile"])
+	if tile_id == "crystal_mount":
+		_end_pedal()
 		return _collect_crystal_pool()
+	if tile_id == "workshop":
+		workshop_visit = {"built": 0, "pending_slot": -1, "pending_any": ""}
+		return true
 	var bought: Array[String] = []
 	market_visit = {"sold": 0, "bought": bought}
 	return true
@@ -267,7 +310,7 @@ func play_reason(hand_index: int) -> String:
 	var card := _card_at(hand_index)
 	var kind := int(card["kind"])
 	if kind == CardData.Kind.RESOURCE:
-		return "Resources can't be played"
+		return "Materials can't be played"
 	if kind == CardData.Kind.ALIEN and str(card.get("alien_mode", "")) == "unplayable":
 		return "Skrim can't be played"
 	if actions_left <= 0:
@@ -326,16 +369,17 @@ func play_gear(hand_index: int, replace_slot: int = -1) -> bool:
 		return false
 	var gear: Array = player["gear"]
 	var card_id := _take_from_hand(player, hand_index)
+	if gear.size() >= GEAR_SLOTS and (replace_slot < 0 or replace_slot >= gear.size()):
+		player["hand"].insert(hand_index, card_id)
+		print("Refused: choose a gear slot to replace")
+		return false
+	_end_pedal()
 	if gear.size() < GEAR_SLOTS:
 		gear.append(card_id)
 		actions_left -= 1
 		_public("%s put down %s" % [player["name"], card["name"]])
 		state_changed.emit()
 		return true
-	if replace_slot < 0 or replace_slot >= gear.size():
-		player["hand"].insert(hand_index, card_id)
-		print("Refused: choose a gear slot to replace")
-		return false
 	var old_id: String = gear[replace_slot]
 	gear[replace_slot] = card_id
 	discard.append(old_id)
@@ -365,6 +409,7 @@ func play_alien(hand_index: int) -> bool:
 	if int(card["kind"]) != CardData.Kind.ALIEN:
 		print("Refused: that card cannot be played")
 		return false
+	_end_pedal()
 	var card_id := _take_from_hand(player, hand_index)
 	var aliens: Array = player["aliens"]
 	aliens.append(card_id)
@@ -448,6 +493,12 @@ func gear_use_reason(slot: int) -> String:
 		return blocked
 	if card_id == "metal_detector":
 		return _deck_here_reason()
+	if card_id == "aether_still":
+		if int(current_player()["gold"]) < 2:
+			return "Needs 2 gold"
+		return ""
+	if card_id == "truth_lantern":
+		return _lantern_block()
 	return ""
 
 
@@ -460,6 +511,10 @@ func use_gear(slot: int) -> bool:
 		print("Refused: %s" % (reason if reason != "" else "that gear cannot be used"))
 		return false
 	var card_id := str(current_player()["gear"][slot])
+	if card_id == "aether_still":
+		return _use_aether(slot)
+	if card_id == "truth_lantern":
+		return _use_lantern(slot)
 	if card_id == "metal_detector" and _lure_applies():
 		_ask_lure("gear", -1, card_id, str(current_player()["tile"]), slot)
 		return true
@@ -497,12 +552,15 @@ func choose_prompt_card(index: int) -> void:
 		other = first
 	deck.append(other)
 	var player := current_player()
+	_drew(first)
+	_drew(second)
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(kept)["name"]])
 	_secret("%s put back: %s" % [player["name"], CardData.get_card(other)["name"]])
 	_close_prompt()
 	found_card_ids.append(kept)
 	_give_card(player, kept)
 	state_changed.emit()
+	_finish_draws()
 
 
 func choose_prompt_button(label: String) -> void:
@@ -535,6 +593,13 @@ func choose_prompt_button(label: String) -> void:
 			_choose_alien_button(label)
 	elif kind == "passenger_choice":
 		_choose_passenger(label)
+	elif kind == "lantern_player":
+		if label == "Cancel":
+			_close_prompt()
+		else:
+			_choose_lantern_player(label)
+	elif kind == "binoculars_look":
+		_finish_binocular_look()
 	else:
 		_close_prompt()
 
@@ -557,6 +622,10 @@ func dismiss_prompt() -> void:
 		cancel_alien_choice()
 	elif kind == "passenger_choice":
 		_choose_passenger("Stay")
+	elif kind == "lantern_player":
+		_close_prompt()
+	elif kind == "binoculars_look":
+		_finish_binocular_look()
 	else:
 		_close_prompt()
 
@@ -668,6 +737,7 @@ func market_finish() -> bool:
 	var traded := sold_count > 0 or not bought.is_empty()
 	if traded and actions_left > 0:
 		actions_left -= 1
+		_end_pedal()
 		_public(_market_log(player, sold_count, bought))
 	market_visit = {}
 	state_changed.emit()
@@ -695,6 +765,7 @@ func _advance_turn() -> void:
 	starting["gear_used_this_turn"] = []
 	starting["aliens_used_this_turn"] = []
 	starting["lure_used_this_turn"] = false
+	_refresh_pedal()
 	print("--- %s's turn ---" % starting["name"])
 	state_changed.emit()
 	turn_ended.emit()
@@ -771,11 +842,13 @@ func _resolve_claw(hand_index: int, tile_id: String, from_bottom: bool) -> bool:
 	var player := current_player()
 	var drawn := _pull(decks[tile_id], from_bottom)
 	_commit_ability(player, hand_index)
+	_drew(drawn)
 	_give_card(player, drawn)
 	found_card_ids.append(drawn)
 	_public("%s played Grappling Claw (from %s)" % [player["name"], _tile_name(tile_id)])
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
 	state_changed.emit()
+	_finish_draws()
 	return true
 
 
@@ -805,11 +878,13 @@ func _perform_base_search(from_bottom: bool) -> bool:
 		return false
 	var drawn := _pull(decks[tile_id], from_bottom)
 	actions_left -= 1
+	_drew(drawn)
 	_give_card(player, drawn)
 	found_card_ids.append(drawn)
 	_public("%s searched %s" % [player["name"], _tile_name(tile_id)])
 	_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
 	state_changed.emit()
+	_finish_draws()
 	return true
 
 
@@ -821,11 +896,13 @@ func _fishing_net(player: Dictionary, hand_index: int, tile_id: String) -> bool:
 		drawn.append(_pull(deck, true))
 	_commit_ability(player, hand_index)
 	for card_id in drawn:
+		_drew(card_id)
 		_give_card(player, card_id)
 		found_card_ids.append(card_id)
 		_secret("%s drew: %s" % [player["name"], CardData.get_card(card_id)["name"]])
 	_public("%s played Fishing Net" % player["name"])
 	state_changed.emit()
+	_finish_draws()
 	return true
 
 
@@ -844,6 +921,7 @@ func _ancient_trowel(player: Dictionary, hand_index: int, tile_id: String, from_
 	_commit_ability(player, hand_index)
 	for i in drawn.size():
 		var card_id: String = drawn[i]
+		_drew(card_id)
 		_give_card(player, card_id)
 		found_card_ids.append(card_id)
 		if i < pulls and CardData.is_resource(card_id):
@@ -852,6 +930,7 @@ func _ancient_trowel(player: Dictionary, hand_index: int, tile_id: String, from_
 			_secret("%s drew: %s" % [player["name"], CardData.get_card(card_id)["name"]])
 	_public("%s played Ancient Trowel" % player["name"])
 	state_changed.emit()
+	_finish_draws()
 	return true
 
 
@@ -859,6 +938,7 @@ func _cargo_manifest(player: Dictionary, hand_index: int, tile_id: String, from_
 	var deck: Array = decks[tile_id]
 	var drawn := _pull(deck, from_bottom)
 	_commit_ability(player, hand_index)
+	_drew(drawn)
 	_give_card(player, drawn)
 	found_card_ids.append(drawn)
 	_public("%s played Cargo Manifest" % player["name"])
@@ -866,6 +946,9 @@ func _cargo_manifest(player: Dictionary, hand_index: int, tile_id: String, from_
 	if _gain_waiting():
 		_follow = {"kind": "cargo", "tile_id": tile_id, "from_bottom": from_bottom}
 		state_changed.emit()
+		return true
+	if _finish_draws():
+		_follow = {"kind": "cargo", "tile_id": tile_id, "from_bottom": from_bottom}
 		return true
 	var shown := _next_pair(deck, from_bottom)
 	state_changed.emit()
@@ -904,16 +987,19 @@ func _finish_gear_use(slot: int, from_bottom: bool) -> bool:
 	var used: Array = player["gear_used_this_turn"]
 	if card_id not in used:
 		used.append(card_id)
+	_end_pedal()
 	actions_left -= 1
 	_public("%s used Metal Detector" % player["name"])
 	var tile_id := str(player["tile"])
 	var deck: Array = decks[tile_id]
 	if deck.size() < 2:
 		var drawn := _pull(deck, from_bottom)
+		_drew(drawn)
 		_give_card(player, drawn)
 		found_card_ids.append(drawn)
 		_secret("%s drew: %s" % [player["name"], CardData.get_card(drawn)["name"]])
 		state_changed.emit()
+		_finish_draws()
 		return true
 	var shown: Array[String] = []
 	if from_bottom:
@@ -1161,6 +1247,7 @@ func _resolve_radio(label: String) -> void:
 
 
 func _commit_ability(player: Dictionary, hand_index: int) -> Dictionary:
+	_end_pedal()
 	var card := CardData.get_card(str(player["hand"][hand_index]))
 	_discard_from_hand(player, hand_index)
 	actions_left -= 1
@@ -1220,7 +1307,7 @@ func _market_log(player: Dictionary, sold_count: int, bought: Array) -> String:
 
 
 func _is_busy() -> bool:
-	return not prompt.is_empty() or not market_visit.is_empty() or not alien_choice.is_empty() or not _handoff.is_empty() or _delivering
+	return not prompt.is_empty() or not market_visit.is_empty() or not workshop_visit.is_empty() or not alien_choice.is_empty() or not _handoff.is_empty() or _delivering or not _binocular_queue.is_empty()
 
 
 func _turn_block() -> String:
@@ -1555,7 +1642,8 @@ func handoff_screen_dismissed() -> void:
 	if phase == "arrive":
 		var actor: Dictionary = players[int(_handoff["actor"])]
 		_handoff["phase"] = "choose"
-		if str(_handoff.get("purpose", "")) == "passenger":
+		var purpose := str(_handoff.get("purpose", ""))
+		if purpose == "passenger":
 			_open_prompt({
 				"kind": "passenger_choice",
 				"title": str(actor["name"]),
@@ -1563,6 +1651,35 @@ func handoff_screen_dismissed() -> void:
 				"cards": [],
 				"clickable": false,
 				"buttons": ["Follow", "Stay"],
+			})
+			return
+		if purpose == "binoculars":
+			var shown: Array[String] = []
+			var stored: Array = _handoff.get("cards", [])
+			for card_id in stored:
+				shown.append(str(card_id))
+			_public("%s saw %s's draw (Brass Binoculars)" % [actor["name"], _binocular_drawer])
+			_open_prompt({
+				"kind": "binoculars_look",
+				"title": str(actor["name"]),
+				"message": str(_handoff["reason"]),
+				"cards": shown,
+				"clickable": false,
+				"buttons": ["Done"],
+			})
+			return
+		if purpose == "lantern":
+			var lantern_cards: Array[String] = []
+			var stored_cards: Array = _handoff.get("cards", [])
+			for card_id in stored_cards:
+				lantern_cards.append(str(card_id))
+			_open_prompt({
+				"kind": "handoff_card",
+				"title": str(actor["name"]),
+				"message": str(_handoff["reason"]),
+				"cards": lantern_cards,
+				"clickable": true,
+				"buttons": [],
 			})
 			return
 		_open_prompt({
@@ -1597,7 +1714,7 @@ func _begin_effect(effect_id: String) -> void:
 		"shadow":
 			_resolve_shadow()
 		"pucky":
-			_prompt_players("pucky", _players_with_cards(), "Pucky", "Choose a player to take a card from.")
+			_prompt_players("pucky", _pucky_targets(), "Pucky", "Choose a player to take a card from.")
 		"pikupiku":
 			var here := _others_here_with_cards()
 			if here.size() == 1:
@@ -1629,7 +1746,7 @@ func _begin_magnet() -> void:
 	if not _pay_for_alien():
 		_drop_choice()
 		return
-	alien_choice["queue"] = _others_here_with_cards()
+	alien_choice["queue"] = _magnet_targets()
 	alien_choice["step"] = "magnet"
 	_next_magnet()
 
@@ -1903,7 +2020,13 @@ func _choose_alien_card(kind: String, index: int) -> void:
 	if index < 0 or index >= cards.size():
 		return
 	if kind == "handoff_card":
-		_handoff["card_index"] = index
+		if str(_handoff.get("purpose", "")) == "lantern":
+			var indexes: Array = _handoff.get("indexes", [])
+			if index < 0 or index >= indexes.size():
+				return
+			_handoff["card_index"] = int(indexes[index])
+		else:
+			_handoff["card_index"] = index
 		_handoff["phase"] = "return"
 		_close_prompt()
 		var current := current_player()
@@ -1984,6 +2107,7 @@ func _pay_for_alien() -> bool:
 		_public("%s discarded a card (Mimix)" % str(user["name"]))
 	if effect_id != "gloop":
 		user["purple"] = int(user["purple"]) - cost
+	_end_pedal()
 	actions_left -= 1
 	var used: Array = user["aliens_used_this_turn"]
 	var marker := str(alien_choice["alien_id"])
@@ -2005,6 +2129,7 @@ func _complete_use(message: String) -> void:
 	if message != "":
 		_public(message)
 	_grant_purple_bonus()
+	_echo_antenna(current_player())
 	alien_choice = {}
 	state_changed.emit()
 
@@ -2189,12 +2314,19 @@ func _begin_handoff(actor_index: int, reason: String, purpose: String) -> void:
 
 
 func _apply_handoff_pick() -> void:
-	if str(_handoff.get("purpose", "")) == "passenger":
+	var purpose := str(_handoff.get("purpose", ""))
+	if purpose == "passenger":
 		_finish_passenger_choice()
+		return
+	if purpose == "binoculars":
+		_handoff = {}
+		_next_binocular()
+		return
+	if purpose == "lantern":
+		_show_lantern_card()
 		return
 	var actor_index := int(_handoff["actor"])
 	var card_index := int(_handoff["card_index"])
-	var purpose := str(_handoff["purpose"])
 	_handoff = {}
 	var actor: Dictionary = players[actor_index]
 	var hand: Array = actor["hand"]
@@ -2248,6 +2380,7 @@ func _pump_incoming() -> void:
 	if added and _after_gains == "" and _follow.is_empty():
 		state_changed.emit()
 	_run_after_gains()
+	_finish_draws()
 
 
 func _flush_incoming() -> void:
@@ -2294,6 +2427,9 @@ func _run_after_gains() -> void:
 	_after_gains = ""
 	_finish_message = ""
 	if str(follow.get("kind", "")) == "cargo":
+		if _finish_draws():
+			_follow = follow
+			return
 		_open_cargo_reorder(str(follow["tile_id"]), bool(follow["from_bottom"]))
 	if after == "magnet_next":
 		_next_magnet()
@@ -2392,6 +2528,8 @@ func _alien_target_reason(alien_id: String) -> String:
 				return "No other player here"
 			if _others_here_with_cards().is_empty():
 				return "Nobody here has a card"
+			if _magnet_targets().is_empty():
+				return "Protected by Strongbox"
 		"disko":
 			if discard.is_empty():
 				return "Discard pile is empty"
@@ -2407,6 +2545,8 @@ func _alien_target_reason(alien_id: String) -> String:
 		"pucky":
 			if _players_with_cards().is_empty():
 				return "No other player has a card"
+			if _pucky_targets().is_empty():
+				return "Protected by Strongbox"
 		"pikupiku":
 			if _others_on_tile().is_empty():
 				return "No other player here"
@@ -2561,3 +2701,490 @@ func _place_debug_aliens() -> void:
 			if CardData.is_alien(id):
 				aliens.append(id)
 	_check_win()
+
+
+func _end_pedal() -> void:
+	pedal_free = false
+
+
+func _refresh_pedal() -> void:
+	if players.is_empty():
+		pedal_free = false
+		return
+	pedal_free = _wearing(current_player(), "pedal_cart")
+
+
+func _deal_inventions() -> void:
+	var reserved := _reserved_inventions()
+	var ids: Array[String] = []
+	for card_id in CardData.invention_ids():
+		if card_id in reserved:
+			continue
+		ids.append(card_id)
+	ids.shuffle()
+	invention_deck = ids
+	blueprint_row = ["", "", ""]
+	for slot in blueprint_row.size():
+		if invention_deck.is_empty():
+			break
+		blueprint_row[slot] = str(invention_deck.pop_front())
+
+
+func _reserved_inventions() -> Array[String]:
+	var reserved: Array[String] = []
+	for key in DEBUG_PLAYER_GEAR.keys():
+		var list: Array = DEBUG_PLAYER_GEAR[key]
+		for card_id in list:
+			var id := str(card_id)
+			if CardData.is_invention(id) and id not in reserved:
+				reserved.append(id)
+	return reserved
+
+
+func _give_debug_gear() -> void:
+	for key in DEBUG_PLAYER_GEAR.keys():
+		var index := int(key)
+		if index < 0 or index >= players.size():
+			continue
+		var who: Dictionary = players[index]
+		var gear: Array = who["gear"]
+		var list: Array = DEBUG_PLAYER_GEAR[key]
+		for card_id in list:
+			if gear.size() >= GEAR_SLOTS:
+				break
+			var id := str(card_id)
+			var card := CardData.get_card(id)
+			if card.is_empty() or int(card["kind"]) != CardData.Kind.GEAR:
+				continue
+			gear.append(id)
+
+
+func workshop_has_built() -> bool:
+	return not workshop_visit.is_empty() and int(workshop_visit.get("built", 0)) > 0
+
+
+func workshop_pending_slot() -> int:
+	if workshop_visit.is_empty():
+		return -1
+	return int(workshop_visit.get("pending_slot", -1))
+
+
+func can_build(slot: int) -> bool:
+	return build_reason(slot) == ""
+
+
+func build_reason(slot: int) -> String:
+	if workshop_visit.is_empty():
+		return "The workshop is not open"
+	if str(current_player()["tile"]) != "workshop":
+		return "Nothing to interact with here"
+	if slot < 0 or slot >= blueprint_row.size() or blueprint_row[slot] == "":
+		return "No more inventions"
+	if int(workshop_visit.get("built", 0)) == 0 and actions_left <= 0:
+		return "No actions left"
+	var missing := _missing_materials(slot)
+	if not missing.is_empty():
+		return "Missing: %s" % ", ".join(missing)
+	return ""
+
+
+func recipe_marks(slot: int) -> Array:
+	if slot < 0 or slot >= blueprint_row.size() or blueprint_row[slot] == "":
+		return []
+	return _recipe_status(current_player(), blueprint_row[slot])
+
+
+func spare_materials(slot: int) -> Array[String]:
+	var spares: Array[String] = []
+	if slot < 0 or slot >= blueprint_row.size() or blueprint_row[slot] == "":
+		return spares
+	var counts := _material_counts(current_player())
+	for part in CardData.recipe_of(blueprint_row[slot]):
+		if part == "any":
+			continue
+		if int(counts.get(part, 0)) > 0:
+			counts[part] = int(counts[part]) - 1
+	for material_id in CardData.RESOURCE_IDS:
+		if int(counts.get(material_id, 0)) > 0:
+			spares.append(material_id)
+	return spares
+
+
+func build(slot: int, any_choice: String = "") -> bool:
+	var reason := build_reason(slot)
+	if reason != "":
+		print("Refused: %s" % reason)
+		return false
+	var invention_id := blueprint_row[slot]
+	var recipe := CardData.recipe_of(invention_id)
+	if "any" in recipe:
+		if any_choice == "" or any_choice not in spare_materials(slot):
+			print("Refused: choose a material")
+			return false
+	var gear: Array = current_player()["gear"]
+	if gear.size() >= GEAR_SLOTS:
+		workshop_visit["pending_slot"] = slot
+		workshop_visit["pending_any"] = any_choice
+		state_changed.emit()
+		return true
+	return _complete_build(slot, any_choice, -1)
+
+
+func workshop_replace(gear_index: int) -> bool:
+	var slot := workshop_pending_slot()
+	if slot < 0:
+		print("Refused: nothing to replace")
+		return false
+	var gear: Array = current_player()["gear"]
+	if gear_index < 0 or gear_index >= gear.size():
+		print("Refused: no gear there")
+		return false
+	return _complete_build(slot, str(workshop_visit.get("pending_any", "")), gear_index)
+
+
+func workshop_cancel_replace() -> void:
+	if workshop_visit.is_empty():
+		return
+	workshop_visit["pending_slot"] = -1
+	workshop_visit["pending_any"] = ""
+	state_changed.emit()
+
+
+func workshop_finish() -> bool:
+	if workshop_visit.is_empty():
+		return false
+	var built := int(workshop_visit.get("built", 0))
+	if built > 0 and actions_left > 0:
+		actions_left -= 1
+		_end_pedal()
+	workshop_visit = {}
+	state_changed.emit()
+	return built > 0
+
+
+func _complete_build(slot: int, any_choice: String, replace_index: int) -> bool:
+	var player := current_player()
+	var invention_id := blueprint_row[slot]
+	var paid := _take_recipe(player, invention_id, any_choice)
+	if paid.is_empty():
+		print("Refused: missing materials")
+		return false
+	var gear: Array = player["gear"]
+	if replace_index >= 0:
+		discard.append(str(gear[replace_index]))
+		gear[replace_index] = invention_id
+	else:
+		gear.append(invention_id)
+	if invention_deck.is_empty():
+		blueprint_row[slot] = ""
+	else:
+		blueprint_row[slot] = str(invention_deck.pop_front())
+	workshop_visit["built"] = int(workshop_visit.get("built", 0)) + 1
+	workshop_visit["pending_slot"] = -1
+	workshop_visit["pending_any"] = ""
+	var names := PackedStringArray()
+	for material_id in paid:
+		names.append(str(CardData.get_card(material_id)["name"]))
+	_public("%s built %s at the Workshop (%s)" % [
+		player["name"],
+		CardData.get_card(invention_id)["name"],
+		", ".join(names),
+	])
+	state_changed.emit()
+	return true
+
+
+func _take_recipe(player: Dictionary, invention_id: String, any_choice: String) -> Array[String]:
+	var paid: Array[String] = []
+	var hand: Array = player["hand"]
+	var used: Array[int] = []
+	for part in CardData.recipe_of(invention_id):
+		var want := any_choice if part == "any" else part
+		var found := -1
+		for i in hand.size():
+			if i in used:
+				continue
+			if str(hand[i]) == want:
+				found = i
+				break
+		if found < 0:
+			return []
+		used.append(found)
+		paid.append(want)
+	used.sort()
+	used.reverse()
+	for index in used:
+		_discard_from_hand(player, int(index))
+	return paid
+
+
+func _missing_materials(slot: int) -> PackedStringArray:
+	var missing := PackedStringArray()
+	for mark in _recipe_status(current_player(), blueprint_row[slot]):
+		var info: Dictionary = mark
+		if not bool(info["ok"]):
+			missing.append(str(info["label"]))
+	return missing
+
+
+func _recipe_status(player: Dictionary, invention_id: String) -> Array:
+	var counts := _material_counts(player)
+	var marks: Array = []
+	for part in CardData.recipe_of(invention_id):
+		if part == "any":
+			var spare := false
+			for material_id in CardData.RESOURCE_IDS:
+				if int(counts.get(material_id, 0)) > 0:
+					spare = true
+					break
+			marks.append({"label": "Any material", "ok": spare})
+			continue
+		var have := int(counts.get(part, 0)) > 0
+		if have:
+			counts[part] = int(counts[part]) - 1
+		marks.append({"label": str(CardData.get_card(part)["name"]), "ok": have})
+	return marks
+
+
+func _material_counts(player: Dictionary) -> Dictionary:
+	var counts := {}
+	var hand: Array = player["hand"]
+	for card_id in hand:
+		var id := str(card_id)
+		if CardData.is_resource(id):
+			counts[id] = int(counts.get(id, 0)) + 1
+	return counts
+
+
+func _spend_gear_action(slot: int) -> void:
+	var player := current_player()
+	var gear: Array = player["gear"]
+	var card_id := str(gear[slot])
+	var used: Array = player["gear_used_this_turn"]
+	if card_id not in used:
+		used.append(card_id)
+	_end_pedal()
+	actions_left -= 1
+
+
+func _use_aether(slot: int) -> bool:
+	var player := current_player()
+	if int(player["gold"]) < 2:
+		print("Refused: Needs 2 gold")
+		return false
+	_spend_gear_action(slot)
+	_add_gold(player, -2)
+	player["purple"] = int(player["purple"]) + 1
+	_public("%s used Aether Still (-2 gold, +1 purple)" % str(player["name"]))
+	state_changed.emit()
+	return true
+
+
+func _lantern_block() -> String:
+	if _others_on_tile().is_empty():
+		return "No other player here"
+	if _others_here_with_cards().is_empty():
+		return "Nobody here has a card"
+	return ""
+
+
+func _use_lantern(slot: int) -> bool:
+	var targets := _others_here_with_cards()
+	if targets.is_empty():
+		print("Refused: %s" % _lantern_block())
+		return false
+	if targets.size() == 1:
+		_begin_lantern(slot, targets[0])
+		return true
+	var labels: Array[String] = []
+	var player_for := {}
+	for target_index in targets:
+		var who: Dictionary = players[target_index]
+		var label := str(who["name"])
+		labels.append(label)
+		player_for[label] = target_index
+	_open_prompt({
+		"kind": "lantern_player",
+		"title": "Truth Lantern",
+		"message": "Choose a player on your tile.",
+		"cards": [],
+		"clickable": false,
+		"buttons": labels,
+		"player_for": player_for,
+		"slot": slot,
+	})
+	return true
+
+
+func _choose_lantern_player(label: String) -> void:
+	var player_for: Dictionary = prompt.get("player_for", {})
+	if not player_for.has(label):
+		return
+	var slot := int(prompt.get("slot", -1))
+	var target_index := int(player_for[label])
+	_close_prompt()
+	_begin_lantern(slot, target_index)
+
+
+func _begin_lantern(slot: int, target_index: int) -> void:
+	_spend_gear_action(slot)
+	var target: Dictionary = players[target_index]
+	var hand: Array = target["hand"]
+	var aliens_only := false
+	for card_id in hand:
+		if CardData.is_alien(str(card_id)):
+			aliens_only = true
+			break
+	var cards: Array[String] = []
+	var indexes: Array = []
+	for i in hand.size():
+		var card_id := str(hand[i])
+		if aliens_only and not CardData.is_alien(card_id):
+			continue
+		cards.append(card_id)
+		indexes.append(i)
+	var reason := "%s used Truth Lantern: show 1 card." % str(current_player()["name"])
+	_handoff = {
+		"actor": target_index,
+		"reason": reason,
+		"purpose": "lantern",
+		"phase": "arrive",
+		"card_index": -1,
+		"cards": cards,
+		"indexes": indexes,
+	}
+	handoff_screen.emit("%s, take the device." % str(target["name"]), reason, target["color"])
+	state_changed.emit()
+
+
+func _show_lantern_card() -> void:
+	var actor_index := int(_handoff["actor"])
+	var card_index := int(_handoff.get("card_index", -1))
+	var actor: Dictionary = players[actor_index]
+	var hand: Array = actor["hand"]
+	var card_id := ""
+	if card_index >= 0 and card_index < hand.size():
+		card_id = str(hand[card_index])
+	var target_name := str(actor["name"])
+	_handoff = {}
+	_public("%s used Truth Lantern on %s" % [str(current_player()["name"]), target_name])
+	if card_id != "":
+		_secret("%s saw %s's %s (Truth Lantern)" % [
+			str(current_player()["name"]),
+			target_name,
+			CardData.get_card(card_id)["name"],
+		])
+		_open_prompt({
+			"kind": "peek",
+			"title": "Truth Lantern",
+			"message": "%s showed you a card." % target_name,
+			"cards": [card_id],
+			"clickable": false,
+			"buttons": ["Done"],
+		})
+	state_changed.emit()
+
+
+func _echo_antenna(user: Dictionary) -> void:
+	var user_index := int(user["index"])
+	for player in players:
+		var who: Dictionary = player
+		if int(who["index"]) == user_index:
+			continue
+		if not _wearing(who, "echo_antenna"):
+			continue
+		who["purple"] = int(who["purple"]) + 1
+		_public("%s gained 1 purple (Echo Antenna)" % str(who["name"]))
+
+
+func _magnet_targets() -> Array[int]:
+	var found: Array[int] = []
+	for target_index in _others_here_with_cards():
+		if _wearing(players[target_index], "strongbox"):
+			continue
+		found.append(target_index)
+	return found
+
+
+func _pucky_targets() -> Array[int]:
+	var found: Array[int] = []
+	for target_index in _players_with_cards():
+		if _wearing(players[target_index], "strongbox"):
+			continue
+		found.append(target_index)
+	return found
+
+
+func _drew(card_id: String) -> void:
+	_draw_batch.append(card_id)
+
+
+func _finish_draws() -> bool:
+	if _draw_batch.is_empty():
+		return false
+	if _gain_waiting() or not prompt.is_empty() or not _handoff.is_empty() or not _binocular_queue.is_empty():
+		return false
+	var cards: Array[String] = []
+	for card_id in _draw_batch:
+		cards.append(str(card_id))
+	_draw_batch = []
+	return _start_binoculars(current_player(), cards)
+
+
+func _start_binoculars(drawer: Dictionary, cards: Array[String]) -> bool:
+	var viewers: Array = []
+	var count := players.size()
+	var start := int(drawer["index"])
+	var tile := str(drawer["tile"])
+	for step in range(1, count):
+		var who: Dictionary = players[(start + step) % count]
+		if str(who["tile"]) != tile:
+			continue
+		if not _wearing(who, "brass_binoculars"):
+			continue
+		viewers.append(int(who["index"]))
+	if viewers.is_empty():
+		return false
+	_binocular_queue = viewers
+	_binocular_cards = cards
+	_binocular_drawer = str(drawer["name"])
+	_next_binocular()
+	return not _handoff.is_empty()
+
+
+func _next_binocular() -> void:
+	while not _binocular_queue.is_empty():
+		var viewer_index := int(_binocular_queue.pop_front())
+		var who: Dictionary = players[viewer_index]
+		if str(who["tile"]) != str(current_player()["tile"]):
+			continue
+		if not _wearing(who, "brass_binoculars"):
+			continue
+		var shown: Array[String] = []
+		for card_id in _binocular_cards:
+			shown.append(str(card_id))
+		_handoff = {
+			"actor": viewer_index,
+			"reason": "These cards were drawn.",
+			"purpose": "binoculars",
+			"phase": "arrive",
+			"card_index": -1,
+			"cards": shown,
+		}
+		handoff_screen.emit("%s, take the device." % str(who["name"]), "These cards were drawn.", who["color"])
+		state_changed.emit()
+		return
+	_binocular_cards = []
+	_binocular_drawer = ""
+	_run_after_gains()
+
+
+func _finish_binocular_look() -> void:
+	_handoff["phase"] = "return"
+	_close_prompt()
+	var player := current_player()
+	handoff_screen.emit(
+		"Pass the device back to %s." % str(player["name"]),
+		"Click to continue.",
+		player["color"]
+	)
